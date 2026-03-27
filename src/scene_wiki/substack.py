@@ -360,6 +360,7 @@ def scrape_substack_archive(
         "archive_posts_seen": len(archive_posts),
         "archive_posts_selected": len(filtered_posts),
         "posts_saved": len(documents),
+        "total_text_characters": sum(item["text_length"] for item in manifest),
         "full_posts": sum(1 for item in manifest if item["body_kind"] == "full"),
         "preview_only_posts": sum(1 for item in manifest if item["body_kind"] == "preview"),
     }

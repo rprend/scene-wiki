@@ -34,7 +34,7 @@ def scrape_substack_command(
     )
     typer.echo(
         f"Saved {result['posts_saved']} posts from {result['archive_posts_selected']} selected archive entries "
-        f"into {result['run_dir']}"
+        f"({result['total_text_characters']} chars) into {result['run_dir']}"
     )
     typer.echo(result["run_dir"])
 
@@ -107,7 +107,7 @@ def build_substack_command(
     actual_vault_dir = vault_dir or Path("vault") / actual_run_dir.name
     typer.echo(
         f"Saved {scrape_result['posts_saved']} posts from {scrape_result['archive_posts_selected']} selected archive entries "
-        f"into {actual_run_dir}"
+        f"({scrape_result['total_text_characters']} chars) into {actual_run_dir}"
     )
     typer.echo(f"Building newsletter corpus in {actual_run_dir}")
     build_newsletter_corpus(run_dir=actual_run_dir, model=model, workers=workers)

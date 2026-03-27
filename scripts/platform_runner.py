@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -75,6 +76,189 @@ def tail_log(log_path: Path, max_chars: int = 8000) -> str:
     return content[-max_chars:]
 
 
+def format_seconds(seconds: float | None) -> str | None:
+    if seconds is None:
+        return None
+    seconds = max(int(seconds), 0)
+    minutes, secs = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h {minutes}m"
+    if minutes:
+        return f"{minutes}m {secs}s"
+    return f"{secs}s"
+
+
+class BuildProgressTracker:
+    def __init__(self, *, base_url: str, job_id: str, start_time: float) -> None:
+        self.base_url = base_url
+        self.job_id = job_id
+        self.start_time = start_time
+        self.stage_started_at: dict[str, float] = {}
+        self.last_progress_key: tuple[str, int | None, str] | None = None
+        self.corpus_total_chunks: int | None = None
+        self.corpus_completed_chunks = 0
+
+    def emit(self, message: str, *, stage: str, overall_progress_pct: int | None = None, payload: dict | None = None) -> None:
+        combined_payload = dict(payload or {})
+        combined_payload["stage"] = stage
+        combined_payload["elapsedSeconds"] = round(time.monotonic() - self.start_time, 1)
+        if overall_progress_pct is not None:
+            combined_payload["overallProgressPct"] = overall_progress_pct
+
+        progress_key = (stage, overall_progress_pct, message)
+        if progress_key == self.last_progress_key:
+            return
+        self.last_progress_key = progress_key
+        log_event(self.base_url, self.job_id, message, payload=combined_payload)
+
+    def start_stage(self, stage: str, message: str, *, overall_progress_pct: int | None = None, payload: dict | None = None) -> None:
+        self.stage_started_at[stage] = time.monotonic()
+        self.emit(message, stage=stage, overall_progress_pct=overall_progress_pct, payload=payload)
+
+    def handle_line(self, line: str) -> None:
+        text = line.strip()
+        if not text:
+            return
+
+        if text.startswith("Scraping Substack archive: "):
+            archive_url = text.split(": ", 1)[1]
+            self.start_stage(
+                "scrape",
+                "Scraping publication archive.",
+                overall_progress_pct=2,
+                payload={"archiveUrl": archive_url},
+            )
+            return
+
+        scrape_match = re.match(
+            r"Saved (\d+) posts from (\d+) selected archive entries \((\d+) chars\) into (.+)",
+            text,
+        )
+        if scrape_match:
+            posts_saved = int(scrape_match.group(1))
+            archive_posts_selected = int(scrape_match.group(2))
+            total_text_characters = int(scrape_match.group(3))
+            run_dir = scrape_match.group(4)
+            self.emit(
+                "Archive scrape complete.",
+                stage="scrape",
+                overall_progress_pct=15,
+                payload={
+                    "postsSaved": posts_saved,
+                    "archivePostsSelected": archive_posts_selected,
+                    "totalTextCharacters": total_text_characters,
+                    "runDir": run_dir,
+                },
+            )
+            return
+
+        if text.startswith("Building newsletter corpus in "):
+            run_dir = text.replace("Building newsletter corpus in ", "", 1)
+            self.start_stage(
+                "analysis",
+                "Analyzing newsletter content.",
+                overall_progress_pct=18,
+                payload={"runDir": run_dir},
+            )
+            return
+
+        chunk_count_match = re.search(r"(\d+) chunks cached, (\d+) to extract", text)
+        if chunk_count_match:
+            cached_chunks = int(chunk_count_match.group(1))
+            pending_chunks = int(chunk_count_match.group(2))
+            self.corpus_total_chunks = cached_chunks + pending_chunks
+            self.corpus_completed_chunks = cached_chunks
+            eta_seconds = None
+            if self.corpus_total_chunks == 0:
+                overall_progress_pct = 70
+            else:
+                overall_progress_pct = 20 + int((self.corpus_completed_chunks / self.corpus_total_chunks) * 50)
+            self.emit(
+                "Corpus chunk plan ready.",
+                stage="analysis",
+                overall_progress_pct=overall_progress_pct,
+                payload={
+                    "cachedChunks": cached_chunks,
+                    "pendingChunks": pending_chunks,
+                    "totalChunks": self.corpus_total_chunks,
+                    "etaSeconds": eta_seconds,
+                },
+            )
+            return
+
+        chunk_match = re.match(r"\[(\d+)/(\d+)\]\s+(.+?)\s+->\s+(\d+) entities", text)
+        if chunk_match:
+            completed = int(chunk_match.group(1))
+            total = int(chunk_match.group(2))
+            doc_id = chunk_match.group(3)
+            entity_count = int(chunk_match.group(4))
+            self.corpus_total_chunks = total
+            self.corpus_completed_chunks = max(self.corpus_completed_chunks, completed)
+            analysis_start = self.stage_started_at.get("analysis", self.start_time)
+            elapsed = time.monotonic() - analysis_start
+            eta_seconds = None
+            if completed > 0 and total > completed:
+                eta_seconds = (elapsed / completed) * (total - completed)
+            overall_progress_pct = 20 + int((completed / total) * 50)
+            self.emit(
+                f"Analyzed chunk {completed}/{total}.",
+                stage="analysis",
+                overall_progress_pct=overall_progress_pct,
+                payload={
+                    "completedChunks": completed,
+                    "totalChunks": total,
+                    "docId": doc_id,
+                    "chunkEntityCount": entity_count,
+                    "analysisProgressPct": round((completed / total) * 100, 1),
+                    "etaSeconds": round(eta_seconds, 1) if eta_seconds is not None else None,
+                    "etaLabel": format_seconds(eta_seconds),
+                },
+            )
+            return
+
+        done_match = re.match(r"Done:\s+(\d+) total chunks", text)
+        if done_match:
+            total_chunks = int(done_match.group(1))
+            self.emit(
+                "Analysis complete.",
+                stage="analysis",
+                overall_progress_pct=70,
+                payload={"totalChunks": total_chunks},
+            )
+            return
+
+        if text.startswith("Building full site into "):
+            output_dir = text.replace("Building full site into ", "", 1)
+            self.start_stage(
+                "site-build",
+                "Starting site build.",
+                overall_progress_pct=76,
+                payload={"outputDir": output_dir},
+            )
+            return
+
+        stage_map = {
+            "Preparing wiki content": ("site-content", "Preparing wiki content.", 80),
+            "Building Quartz site": ("quartz", "Building Quartz pages.", 86),
+            "Building search assets": ("search-assets", "Building search assets.", 91),
+            "Bundling frontend assets": ("bundle-assets", "Bundling frontend assets.", 95),
+        }
+        if text in stage_map:
+            stage, message, progress = stage_map[text]
+            self.start_stage(stage, message, overall_progress_pct=progress)
+            return
+
+        if text.startswith("Site build complete: "):
+            output_dir = text.replace("Site build complete: ", "", 1)
+            self.emit(
+                "Static wiki build complete.",
+                stage="site-build",
+                overall_progress_pct=96,
+                payload={"outputDir": output_dir},
+            )
+
+
 def run_logged_command(
     command: list[str],
     *,
@@ -84,6 +268,7 @@ def run_logged_command(
     base_url: str | None = None,
     job_id: str | None = None,
     heartbeat_message: str | None = None,
+    on_line=None,
 ) -> None:
     append_log(log_path, f"\n$ {' '.join(command)}\n")
     process = subprocess.Popen(
@@ -102,6 +287,8 @@ def run_logged_command(
     for line in process.stdout:
         append_log(log_path, line)
         recent_lines.append(line.rstrip())
+        if on_line:
+            on_line(line)
         if base_url and job_id and heartbeat_message and time.monotonic() - last_heartbeat >= 15:
             heartbeat(base_url, job_id, heartbeat_message)
             last_heartbeat = time.monotonic()
@@ -253,6 +440,7 @@ def run_scene_wiki_build(job: dict, workdir: Path, custom_domain: str, log_path:
     max_articles = os.getenv("SCENE_WIKI_MAX_ARTICLES", "").strip()
     if max_articles:
         command.extend(["--max-articles", max_articles])
+    tracker = BuildProgressTracker(base_url=base_url, job_id=job["id"], start_time=time.monotonic())
     run_logged_command(
         command,
         cwd=workdir,
@@ -261,6 +449,7 @@ def run_scene_wiki_build(job: dict, workdir: Path, custom_domain: str, log_path:
         base_url=base_url,
         job_id=job["id"],
         heartbeat_message="Scene wiki build still running.",
+        on_line=tracker.handle_line,
     )
     return output_dir
 
@@ -281,6 +470,7 @@ def handle_job(base_url: str, job: dict, workdir: Path) -> None:
         output_dir = run_scene_wiki_build(job, workdir, custom_domain, log_path, base_url)
 
         heartbeat(base_url, job["id"], "Ensuring Cloudflare Pages project exists.")
+        log_event(base_url, job["id"], "Ensuring Cloudflare Pages project exists.", payload={"stage": "pages-project", "overallProgressPct": 97})
         ensure_pages_project(project_name, workdir, log_path)
 
         for secret_name in ("GOOGLE_API_KEY", "GEMINI_API_KEY"):
@@ -290,9 +480,11 @@ def handle_job(base_url: str, job: dict, workdir: Path) -> None:
               set_pages_secret(project_name, secret_name, secret_value, workdir, log_path)
 
         heartbeat(base_url, job["id"], "Deploying site bundle to Cloudflare Pages.")
+        log_event(base_url, job["id"], "Deploying site bundle to Cloudflare Pages.", payload={"stage": "deploy", "overallProgressPct": 98})
         deploy_pages(project_name, output_dir, workdir, log_path)
 
         heartbeat(base_url, job["id"], "Attaching custom domain.")
+        log_event(base_url, job["id"], "Attaching custom domain.", payload={"stage": "domain", "overallProgressPct": 99})
         add_custom_domain(project_name, custom_domain)
 
         api_request(

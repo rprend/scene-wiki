@@ -40,7 +40,30 @@ function formatDate(value) {
   return Number.isNaN(date.valueOf()) ? value : date.toLocaleString()
 }
 
-function renderStatus(job) {
+function formatDuration(seconds) {
+  if (seconds == null || Number.isNaN(Number(seconds))) return null
+  const total = Math.max(0, Math.round(Number(seconds)))
+  const mins = Math.floor(total / 60)
+  const secs = total % 60
+  const hours = Math.floor(mins / 60)
+  const remMins = mins % 60
+  if (hours) return `${hours}h ${remMins}m`
+  if (mins) return `${mins}m ${secs}s`
+  return `${secs}s`
+}
+
+function summarizeEvents(events) {
+  const latestWithProgress = [...events].reverse().find((event) => event.payload?.overallProgressPct != null)
+  const visibleEvents = events.filter((event, index) => {
+    if (event.message !== "Scene wiki build still running.") {
+      return true
+    }
+    return index === events.length - 1
+  }).slice(-8)
+  return { latestWithProgress, visibleEvents }
+}
+
+function renderStatus(job, events = []) {
   statusSection.classList.remove("hidden")
   statusPanel.classList.remove("hidden")
   const siteLink = job.customDomain
@@ -48,13 +71,55 @@ function renderStatus(job) {
     : job.pagesUrl
       ? job.pagesUrl
       : null
+  const { latestWithProgress, visibleEvents } = summarizeEvents(events)
   const lines = [
     `<p><strong>${job.statusLabel}</strong> for <code>${job.siteSlug}</code></p>`,
     `<p class="status-meta">Job ${job.id} · queued ${formatDate(job.queueTime)} · updated ${formatDate(job.updatedAt)}</p>`,
   ]
 
+  if (latestWithProgress?.payload?.overallProgressPct != null) {
+    const etaLabel = latestWithProgress.payload.etaLabel || formatDuration(latestWithProgress.payload.etaSeconds)
+    const stage = latestWithProgress.payload.stage || "running"
+    lines.push(`
+      <div class="progress-shell">
+        <div class="progress-meta">
+          <span>${latestWithProgress.message}</span>
+          <span>${latestWithProgress.payload.overallProgressPct}%</span>
+        </div>
+        <div class="progress-bar"><span style="width: ${latestWithProgress.payload.overallProgressPct}%"></span></div>
+        <p class="status-meta">Stage: ${stage}${etaLabel ? ` · ETA ${etaLabel}` : ""}</p>
+      </div>
+    `)
+  }
+
   if (job.errorMessage) {
     lines.push(`<p>${job.errorMessage}</p>`)
+  }
+
+  if (visibleEvents.length) {
+    const items = visibleEvents
+      .map((event) => {
+        const detailParts = []
+        if (event.payload?.analysisProgressPct != null) {
+          detailParts.push(`${event.payload.analysisProgressPct}% analysis`)
+        }
+        if (event.payload?.totalChunks != null && event.payload?.completedChunks != null) {
+          detailParts.push(`${event.payload.completedChunks}/${event.payload.totalChunks} chunks`)
+        }
+        if (event.payload?.postsSaved != null) {
+          detailParts.push(`${event.payload.postsSaved} posts`)
+        }
+        if (event.payload?.totalTextCharacters != null) {
+          detailParts.push(`${event.payload.totalTextCharacters.toLocaleString()} chars`)
+        }
+        if (event.payload?.etaLabel) {
+          detailParts.push(`ETA ${event.payload.etaLabel}`)
+        }
+        const detail = detailParts.length ? ` · ${detailParts.join(" · ")}` : ""
+        return `<li><strong>${event.message}</strong><span class="status-event-meta">${detail} · ${formatDate(event.createdAt)}</span></li>`
+      })
+      .join("")
+    lines.push(`<div class="status-events"><ol>${items}</ol></div>`)
   }
 
   if (siteLink) {
@@ -143,8 +208,11 @@ async function loadSites() {
 }
 
 async function loadJob(jobId) {
-  const payload = await fetchJson(`/api/jobs/${jobId}`)
-  renderStatus(payload.job)
+  const [payload, eventsPayload] = await Promise.all([
+    fetchJson(`/api/jobs/${jobId}`),
+    fetchJson(`/api/jobs/${jobId}/events`).catch(() => ({ events: [] })),
+  ])
+  renderStatus(payload.job, eventsPayload.events || [])
   const terminalStates = new Set(["deployed", "failed"])
   if (terminalStates.has(payload.job.status)) {
     window.clearInterval(state.pollTimer)

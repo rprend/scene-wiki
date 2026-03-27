@@ -49,9 +49,13 @@ def build_full_site(
     vault_dir: Path,
     quartz_concurrency: int = 3,
 ) -> dict[str, Any]:
+    print("Preparing wiki content", flush=True)
     build_scene_wiki(run_dir=run_dir, site_dir=wiki_dir, vault_dir=vault_dir)
+    print("Building Quartz site", flush=True)
     build_quartz_site(wiki_dir=wiki_dir, output_dir=output_dir, concurrency=quartz_concurrency)
+    print("Building search assets", flush=True)
     build_scene_search_assets(run_dir=run_dir, output_dir=output_dir)
+    print("Bundling frontend assets", flush=True)
     bundle_frontend_assets(wiki_dir=wiki_dir, output_dir=output_dir)
     return {
         "run_dir": str(run_dir),
