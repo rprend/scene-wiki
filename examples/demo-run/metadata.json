@@ -1,0 +1,7 @@
+{
+  "run_id": "demo-run",
+  "source": "browser",
+  "subject": "Fake Literary Scene",
+  "provider": "demo-fixture",
+  "notes": "Minimal demo dataset for the standalone scene-wiki repo."
+}

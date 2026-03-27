@@ -1,0 +1,157 @@
+{
+  "subject": "Fake Literary Scene",
+  "generated_at": "2026-03-27T14:00:00Z",
+  "post_count": 2,
+  "entity_count": 8,
+  "link_summary": {
+    "total_links": 0,
+    "posts_with_links": 0,
+    "unique_instagram_handles": 0,
+    "by_type": {},
+    "by_domain_top30": {}
+  },
+  "entities": [
+    {
+      "name": "Lantern House",
+      "category": "venue",
+      "aliases": [],
+      "mention_count": 2,
+      "evidence": [
+        "Lantern House hosted a crowded Friday reading",
+        "planned another Lantern House reading"
+      ],
+      "confidence": 0.98,
+      "post_ids": [
+        "2026-03-01_midnight-readings_full",
+        "2026-03-14_rainy-screening_full"
+      ],
+      "first_seen": "2026-03-01",
+      "last_seen": "2026-03-14",
+      "urls": [],
+      "link_types": []
+    },
+    {
+      "name": "Soft Signal",
+      "category": "publication",
+      "aliases": [],
+      "mention_count": 2,
+      "evidence": [
+        "the editors of Soft Signal",
+        "People mentioned Soft Signal again"
+      ],
+      "confidence": 0.94,
+      "post_ids": [
+        "2026-03-01_midnight-readings_full",
+        "2026-03-14_rainy-screening_full"
+      ],
+      "first_seen": "2026-03-01",
+      "last_seen": "2026-03-14",
+      "urls": [],
+      "link_types": []
+    },
+    {
+      "name": "Chinatown",
+      "category": "place",
+      "aliases": [],
+      "mention_count": 2,
+      "evidence": [
+        "Friday reading in Chinatown",
+        "compared notes on Chinatown venues"
+      ],
+      "confidence": 0.92,
+      "post_ids": [
+        "2026-03-01_midnight-readings_full",
+        "2026-03-14_rainy-screening_full"
+      ],
+      "first_seen": "2026-03-01",
+      "last_seen": "2026-03-14",
+      "urls": [],
+      "link_types": []
+    },
+    {
+      "name": "Mira Vale",
+      "category": "person",
+      "aliases": [],
+      "mention_count": 1,
+      "evidence": [
+        "with Mira Vale, Jonah Reed, and the editors"
+      ],
+      "confidence": 0.93,
+      "post_ids": [
+        "2026-03-01_midnight-readings_full"
+      ],
+      "first_seen": "2026-03-01",
+      "last_seen": "2026-03-01",
+      "urls": [],
+      "link_types": []
+    },
+    {
+      "name": "Jonah Reed",
+      "category": "person",
+      "aliases": [],
+      "mention_count": 1,
+      "evidence": [
+        "with Mira Vale, Jonah Reed, and the editors"
+      ],
+      "confidence": 0.93,
+      "post_ids": [
+        "2026-03-01_midnight-readings_full"
+      ],
+      "first_seen": "2026-03-01",
+      "last_seen": "2026-03-01",
+      "urls": [],
+      "link_types": []
+    },
+    {
+      "name": "glass weather",
+      "category": "book",
+      "aliases": [],
+      "mention_count": 1,
+      "evidence": [
+        "the new chapbook glass weather"
+      ],
+      "confidence": 0.88,
+      "post_ids": [
+        "2026-03-01_midnight-readings_full"
+      ],
+      "first_seen": "2026-03-01",
+      "last_seen": "2026-03-01",
+      "urls": [],
+      "link_types": []
+    },
+    {
+      "name": "Metrograph",
+      "category": "venue",
+      "aliases": [],
+      "mention_count": 1,
+      "evidence": [
+        "reconvened at Metrograph for a rainy screening"
+      ],
+      "confidence": 0.97,
+      "post_ids": [
+        "2026-03-14_rainy-screening_full"
+      ],
+      "first_seen": "2026-03-14",
+      "last_seen": "2026-03-14",
+      "urls": [],
+      "link_types": []
+    },
+    {
+      "name": "River Court",
+      "category": "venue",
+      "aliases": [],
+      "mention_count": 1,
+      "evidence": [
+        "The night ended with dumplings at River Court"
+      ],
+      "confidence": 0.91,
+      "post_ids": [
+        "2026-03-14_rainy-screening_full"
+      ],
+      "first_seen": "2026-03-14",
+      "last_seen": "2026-03-14",
+      "urls": [],
+      "link_types": []
+    }
+  ]
+}
