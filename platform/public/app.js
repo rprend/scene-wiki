@@ -5,6 +5,8 @@ const state = {
   turnstileToken: "",
 }
 
+const LAST_JOB_STORAGE_KEY = "sceneWiki:lastJobId"
+
 const form = document.querySelector("#submit-form")
 const input = document.querySelector("#source-url")
 const button = document.querySelector("#submit-button")
@@ -60,6 +62,23 @@ function renderStatus(job) {
   }
 
   statusBody.innerHTML = lines.join("")
+}
+
+function persistActiveJob(jobId) {
+  state.activeJobId = jobId
+
+  if (jobId) {
+    window.localStorage.setItem(LAST_JOB_STORAGE_KEY, jobId)
+    const url = new URL(window.location.href)
+    url.searchParams.set("job", jobId)
+    window.history.replaceState({}, "", url)
+    return
+  }
+
+  window.localStorage.removeItem(LAST_JOB_STORAGE_KEY)
+  const url = new URL(window.location.href)
+  url.searchParams.delete("job")
+  window.history.replaceState({}, "", url)
 }
 
 function renderSites(sites) {
@@ -132,10 +151,11 @@ async function loadJob(jobId) {
     state.pollTimer = null
     await loadSites()
   }
+  return payload.job
 }
 
 function startPolling(jobId) {
-  state.activeJobId = jobId
+  persistActiveJob(jobId)
   if (state.pollTimer) {
     window.clearInterval(state.pollTimer)
   }
@@ -144,6 +164,25 @@ function startPolling(jobId) {
       statusBody.innerHTML = `<p>${error.message}</p>`
     })
   }, 5000)
+}
+
+async function loadInitialJob() {
+  const url = new URL(window.location.href)
+  const jobId = url.searchParams.get("job") || window.localStorage.getItem(LAST_JOB_STORAGE_KEY)
+  if (!jobId) {
+    return
+  }
+
+  try {
+    const job = await loadJob(jobId)
+    if (!["deployed", "failed"].includes(job.status)) {
+      startPolling(jobId)
+    } else {
+      persistActiveJob(jobId)
+    }
+  } catch {
+    persistActiveJob(null)
+  }
 }
 
 form.addEventListener("submit", async (event) => {
@@ -175,4 +214,10 @@ form.addEventListener("submit", async (event) => {
 
 Promise.all([loadConfig(), loadSites()]).catch((error) => {
   collectionNote.textContent = error.message
+})
+
+loadInitialJob().catch((error) => {
+  statusSection.classList.remove("hidden")
+  statusPanel.classList.remove("hidden")
+  statusBody.innerHTML = `<p>${error.message}</p>`
 })
