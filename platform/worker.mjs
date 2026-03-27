@@ -120,15 +120,6 @@ function slugify(value) {
     .slice(0, 48) || "scene-wiki"
 }
 
-function shortHash(value) {
-  let hash = 5381
-  for (let index = 0; index < value.length; index += 1) {
-    hash = ((hash << 5) + hash) + value.charCodeAt(index)
-    hash >>>= 0
-  }
-  return hash.toString(36).slice(0, 6)
-}
-
 async function urlLooksLive(url) {
   try {
     const response = await fetch(url, {
@@ -164,22 +155,13 @@ async function siteRecordLooksReachable(site) {
 async function allocateSiteSlug(env, title, sourceUrl) {
   const baseSlug = slugify(title).slice(0, 40)
   const { results } = await env.SCENE_WIKI_DB.prepare(
-    `SELECT slug, source_url
+    `SELECT slug
      FROM sites
      WHERE slug = ?
         OR slug GLOB ?`,
   )
     .bind(baseSlug, `${baseSlug}-*`)
     .all()
-
-  const exactForSource = results.find((row) => row.source_url === sourceUrl)
-  const baseOwnedByOtherSource = results.some((row) => row.slug === baseSlug && row.source_url !== sourceUrl)
-  if (exactForSource && exactForSource.slug !== baseSlug && !baseOwnedByOtherSource) {
-    return baseSlug
-  }
-  if (exactForSource) {
-    return exactForSource.slug
-  }
 
   const used = new Set(results.map((row) => row.slug))
   if (!used.has(baseSlug)) {
@@ -193,7 +175,7 @@ async function allocateSiteSlug(env, title, sourceUrl) {
     }
   }
 
-  return `${baseSlug}-${shortHash(sourceUrl)}`
+  return `${baseSlug}-999`
 }
 
 function deriveTitleFromHost(hostname) {
