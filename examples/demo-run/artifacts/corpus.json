@@ -1,8 +1,8 @@
 {
-  "subject": "Fake Literary Scene",
+  "subject": "Silicon Valley Lorem Ipsum",
   "generated_at": "2026-03-27T14:00:00Z",
   "post_count": 2,
-  "entity_count": 8,
+  "entity_count": 9,
   "link_summary": {
     "total_links": 0,
     "posts_with_links": 0,
@@ -12,18 +12,18 @@
   },
   "entities": [
     {
-      "name": "Lantern House",
-      "category": "venue",
+      "name": "Ada Vector",
+      "category": "person",
       "aliases": [],
       "mention_count": 2,
       "evidence": [
-        "Lantern House hosted a crowded Friday reading",
-        "planned another Lantern House reading"
+        "Ada Vector and Milo Kern hosted a salon for founders",
+        "Ada Vector was back"
       ],
       "confidence": 0.98,
       "post_ids": [
-        "2026-03-01_midnight-readings_full",
-        "2026-03-14_rainy-screening_full"
+        "2026-03-01_founder-salon_full",
+        "2026-03-14_demo-day-brunch_full"
       ],
       "first_seen": "2026-03-01",
       "last_seen": "2026-03-14",
@@ -31,18 +31,18 @@
       "link_types": []
     },
     {
-      "name": "Soft Signal",
-      "category": "publication",
+      "name": "Milo Kern",
+      "category": "person",
       "aliases": [],
       "mention_count": 2,
       "evidence": [
-        "the editors of Soft Signal",
-        "People mentioned Soft Signal again"
+        "Ada Vector and Milo Kern hosted a salon",
+        "Milo Kern was still working the room"
       ],
       "confidence": 0.94,
       "post_ids": [
-        "2026-03-01_midnight-readings_full",
-        "2026-03-14_rainy-screening_full"
+        "2026-03-01_founder-salon_full",
+        "2026-03-14_demo-day-brunch_full"
       ],
       "first_seen": "2026-03-01",
       "last_seen": "2026-03-14",
@@ -50,18 +50,37 @@
       "link_types": []
     },
     {
-      "name": "Chinatown",
+      "name": "Nimbus Capital",
+      "category": "organization",
+      "aliases": [],
+      "mention_count": 2,
+      "evidence": [
+        "People kept name-dropping Nimbus Capital",
+        "Nimbus Capital's new climate thesis"
+      ],
+      "confidence": 0.95,
+      "post_ids": [
+        "2026-03-01_founder-salon_full",
+        "2026-03-14_demo-day-brunch_full"
+      ],
+      "first_seen": "2026-03-01",
+      "last_seen": "2026-03-14",
+      "urls": [],
+      "link_types": []
+    },
+    {
+      "name": "Palo Alto",
       "category": "place",
       "aliases": [],
       "mention_count": 2,
       "evidence": [
-        "Friday reading in Chinatown",
-        "compared notes on Chinatown venues"
+        "At a softly absurd dinner in Palo Alto",
+        "Palo Alto dinners were somehow becoming the real distribution channel"
       ],
       "confidence": 0.92,
       "post_ids": [
-        "2026-03-01_midnight-readings_full",
-        "2026-03-14_rainy-screening_full"
+        "2026-03-01_founder-salon_full",
+        "2026-03-14_demo-day-brunch_full"
       ],
       "first_seen": "2026-03-01",
       "last_seen": "2026-03-14",
@@ -69,16 +88,16 @@
       "link_types": []
     },
     {
-      "name": "Mira Vale",
-      "category": "person",
+      "name": "Lattice Forge",
+      "category": "organization",
       "aliases": [],
       "mention_count": 1,
       "evidence": [
-        "with Mira Vale, Jonah Reed, and the editors"
+        "demo day brunch hosted by Lattice Forge"
       ],
       "confidence": 0.93,
       "post_ids": [
-        "2026-03-01_midnight-readings_full"
+        "2026-03-14_demo-day-brunch_full"
       ],
       "first_seen": "2026-03-01",
       "last_seen": "2026-03-01",
@@ -86,16 +105,16 @@
       "link_types": []
     },
     {
-      "name": "Jonah Reed",
-      "category": "person",
+      "name": "Redwood Foundry",
+      "category": "organization",
       "aliases": [],
       "mention_count": 1,
       "evidence": [
-        "with Mira Vale, Jonah Reed, and the editors"
+        "whether Redwood Foundry was an AI lab or a branding exercise"
       ],
       "confidence": 0.93,
       "post_ids": [
-        "2026-03-01_midnight-readings_full"
+        "2026-03-14_demo-day-brunch_full"
       ],
       "first_seen": "2026-03-01",
       "last_seen": "2026-03-01",
@@ -103,16 +122,16 @@
       "link_types": []
     },
     {
-      "name": "glass weather",
-      "category": "book",
+      "name": "zero to one hundred",
+      "category": "publication",
       "aliases": [],
       "mention_count": 1,
       "evidence": [
-        "the new chapbook glass weather"
+        "a memo called zero to one hundred"
       ],
       "confidence": 0.88,
       "post_ids": [
-        "2026-03-01_midnight-readings_full"
+        "2026-03-01_founder-salon_full"
       ],
       "first_seen": "2026-03-01",
       "last_seen": "2026-03-01",
@@ -120,16 +139,16 @@
       "link_types": []
     },
     {
-      "name": "Metrograph",
-      "category": "venue",
+      "name": "SoMa",
+      "category": "place",
       "aliases": [],
       "mention_count": 1,
       "evidence": [
-        "reconvened at Metrograph for a rainy screening"
+        "regrouped in SoMa for a demo day brunch"
       ],
       "confidence": 0.97,
       "post_ids": [
-        "2026-03-14_rainy-screening_full"
+        "2026-03-14_demo-day-brunch_full"
       ],
       "first_seen": "2026-03-14",
       "last_seen": "2026-03-14",
@@ -137,16 +156,16 @@
       "link_types": []
     },
     {
-      "name": "River Court",
-      "category": "venue",
+      "name": "Mission Bay",
+      "category": "place",
       "aliases": [],
       "mention_count": 1,
       "evidence": [
-        "The night ended with dumplings at River Court"
+        "founders compared office space in Mission Bay"
       ],
       "confidence": 0.91,
       "post_ids": [
-        "2026-03-14_rainy-screening_full"
+        "2026-03-14_demo-day-brunch_full"
       ],
       "first_seen": "2026-03-14",
       "last_seen": "2026-03-14",

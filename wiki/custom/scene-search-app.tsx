@@ -64,20 +64,20 @@ type PersistedThreads = {
 const THREAD_STORAGE_KEY = "scene-wiki-search-threads-v1"
 const SUGGESTIONS = [
   {
-    title: "Readings at KGB",
-    prompt: "people hosting readings at KGB",
+    title: "Founder dinners",
+    prompt: "who keeps hosting founder dinners in Palo Alto",
   },
   {
-    title: "Books in circulation",
-    prompt: "books people are reading about",
+    title: "AI labs",
+    prompt: "which AI labs and studios show up most often",
   },
   {
-    title: "Chinatown venues",
-    prompt: "venues in Chinatown",
+    title: "Neighborhoods",
+    prompt: "which neighborhoods around San Francisco keep appearing",
   },
   {
-    title: "Publishing scene",
-    prompt: "publications people kept mentioning",
+    title: "Investors",
+    prompt: "which investors and venture firms are mentioned most",
   },
 ]
 
