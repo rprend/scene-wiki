@@ -9,12 +9,14 @@ const form = document.querySelector("#submit-form")
 const input = document.querySelector("#source-url")
 const button = document.querySelector("#submit-button")
 const statusPanel = document.querySelector("#status-panel")
+const statusSection = document.querySelector("#status-section")
 const statusBody = document.querySelector("#status-body")
 const siteList = document.querySelector("#site-list")
 const collectionNote = document.querySelector("#collection-note")
 const platformTagline = document.querySelector("#platform-tagline")
 const turnstileWrap = document.querySelector("#turnstile-wrap")
 const turnstileWidget = document.querySelector("#turnstile-widget")
+const statsSites = document.querySelector("#stats-sites")
 
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, {
@@ -39,6 +41,7 @@ function formatDate(value) {
 }
 
 function renderStatus(job) {
+  statusSection.classList.remove("hidden")
   statusPanel.classList.remove("hidden")
   const siteLink = job.customDomain
     ? `https://${job.customDomain}`
@@ -62,6 +65,7 @@ function renderStatus(job) {
 }
 
 function renderSites(sites) {
+  statsSites.textContent = String(sites.length)
   if (!sites.length) {
     collectionNote.textContent = "No deployed scene wikis yet."
     siteList.innerHTML = `<div class="empty-state">The first generated wiki will appear here once a job completes.</div>`
@@ -77,7 +81,7 @@ function renderSites(sites) {
         <article class="site-card">
           <h3><a href="${safeHref}" ${href ? 'target="_blank" rel="noreferrer"' : ""}>${site.title}</a></h3>
           <p class="site-meta">${site.sourceUrl}</p>
-          <div class="site-status">${site.statusLabel}</div>
+          <div class="site-status">${site.statusLabel} · ${site.slug}.scenewiki.net</div>
           <div class="site-foot">
             <span class="site-meta">Updated ${formatDate(site.updatedAt)}</span>
             ${href ? `<a href="${safeHref}" target="_blank" rel="noreferrer">Visit wiki</a>` : ""}
@@ -166,6 +170,7 @@ form.addEventListener("submit", async (event) => {
     startPolling(payload.job.id)
     await loadSites()
   } catch (error) {
+    statusSection.classList.remove("hidden")
     statusPanel.classList.remove("hidden")
     statusBody.innerHTML = `<p>${error.message}</p>`
   } finally {
