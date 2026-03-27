@@ -133,7 +133,59 @@ function deriveTitleFromHost(hostname) {
     .join(" ")
 }
 
-function canonicalizeSourceUrl(rawUrl) {
+async function detectSubstackSite(hostname) {
+  const archiveUrl = `https://${hostname}/api/v1/archive?sort=new&search=&offset=0&limit=1`
+
+  try {
+    const archiveResponse = await fetch(archiveUrl, {
+      headers: {
+        accept: "application/json",
+        "user-agent": "SceneWikiBot/1.0 (+https://scenewiki.net)",
+      },
+    })
+    if (archiveResponse.ok) {
+      const posts = await archiveResponse.json()
+      if (Array.isArray(posts) && posts.length > 0) {
+        const publication =
+          posts[0]?.publishedBylines?.[0]?.publicationUsers?.find((entry) => entry?.is_primary)?.publication
+          || posts[0]?.publishedBylines?.[0]?.publicationUsers?.[0]?.publication
+        return {
+          isSubstack: true,
+          title: normalizeWhitespace(publication?.name || deriveTitleFromHost(hostname)),
+        }
+      }
+    }
+  } catch {}
+
+  try {
+    const response = await fetch(`https://${hostname}`, {
+      headers: {
+        accept: "text/html,application/xhtml+xml",
+        "user-agent": "SceneWikiBot/1.0 (+https://scenewiki.net)",
+      },
+    })
+    if (!response.ok) {
+      return { isSubstack: false, title: null }
+    }
+
+    const servedBy = response.headers.get("x-served-by") || ""
+    const cluster = response.headers.get("x-cluster") || ""
+    if (/substack/i.test(servedBy) || /substack/i.test(cluster)) {
+      return { isSubstack: true, title: deriveTitleFromHost(hostname) }
+    }
+
+    const html = await response.text()
+    if (/substack/i.test(html) || /substackcdn\.com/i.test(html)) {
+      const titleMatch = html.match(/<title>([^<]+)<\/title>/i)
+      const title = titleMatch?.[1]?.replace(/\s*\|\s*Substack\s*$/i, "").trim() || deriveTitleFromHost(hostname)
+      return { isSubstack: true, title }
+    }
+  } catch {}
+
+  return { isSubstack: false, title: null }
+}
+
+async function resolveSourceUrl(rawUrl) {
   let parsed
   try {
     parsed = new URL(rawUrl)
@@ -145,14 +197,24 @@ function canonicalizeSourceUrl(rawUrl) {
     throw new HttpError(400, "Only http and https URLs are supported.")
   }
 
-  if (!parsed.hostname.endsWith("substack.com")) {
+  const hostname = parsed.hostname.toLowerCase()
+  if (hostname.endsWith("substack.com")) {
+    return {
+      sourceUrl: `https://${hostname}`,
+      sourceType: "substack",
+      title: deriveTitleFromHost(hostname),
+    }
+  }
+
+  const detection = await detectSubstackSite(hostname)
+  if (!detection.isSubstack) {
     throw new HttpError(400, "v1 only supports Substack publication roots.")
   }
 
   return {
-    sourceUrl: `https://${parsed.hostname}`,
+    sourceUrl: `https://${hostname}`,
     sourceType: "substack",
-    title: deriveTitleFromHost(parsed.hostname),
+    title: detection.title || deriveTitleFromHost(hostname),
   }
 }
 
@@ -324,7 +386,7 @@ async function handleCreateJob(request, env) {
   const sourceUrlRaw = typeof body.sourceUrl === "string" ? body.sourceUrl : ""
   const turnstileToken = typeof body.turnstileToken === "string" ? body.turnstileToken : ""
   const ip = request.headers.get("cf-connecting-ip") || ""
-  const { sourceUrl, sourceType, title } = canonicalizeSourceUrl(sourceUrlRaw)
+  const { sourceUrl, sourceType, title } = await resolveSourceUrl(sourceUrlRaw)
   const slug = `${slugify(title).slice(0, 40)}-${shortHash(sourceUrl)}`
 
   const rateBucket = await getRateBucket(env, ip)
