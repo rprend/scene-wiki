@@ -129,6 +129,18 @@ CATEGORY_INDEX_SCRIPT = [
 ]
 
 
+def _display_category_title(category: str) -> str:
+    return CATEGORY_TITLES.get(category, category.replace("_", " ").title())
+
+
+def _display_category_singular(category: str) -> str:
+    return CATEGORY_SINGULAR.get(category, category.replace("_", " "))
+
+
+def _display_category_description(category: str) -> str:
+    return CATEGORY_DESCRIPTIONS.get(category, f"Entities classified as { _display_category_singular(category) } within this archive.")
+
+
 def _corpus_filename() -> str:
     return os.environ.get("WIKI_CORPUS_FILENAME", "corpus.json")
 
@@ -571,7 +583,7 @@ def _entity_blurb(
     last_seen = _human_date(entity.get("last_seen")) or "an unknown date"
 
     first_sentence = (
-        f"{title} is a recurring {CATEGORY_SINGULAR.get(category, category)} in the {os.environ.get('SCENE_WIKI_ARCHIVE_LABEL', 'archive')} archive, "
+        f"{title} is a recurring {_display_category_singular(category)} in the {os.environ.get('SCENE_WIKI_ARCHIVE_LABEL', 'archive')} archive, "
         f"appearing {mention_count} times across {issue_count} issues between {first_seen} and {last_seen}."
     )
 
@@ -582,7 +594,7 @@ def _entity_blurb(
         ) + "."
     else:
         second_sentence = (
-            f"It belongs to the {CATEGORY_TITLES.get(category, category)} layer of the scene map and is linked from the issues below."
+            f"It belongs to the {_display_category_title(category)} layer of the scene map and is linked from the issues below."
         )
 
     related = sorted(
@@ -757,6 +769,9 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
 
     entity_note_paths = build_entity_note_paths(entities)
     doc_entities = build_doc_entities(docs, entities)
+    category_order = list(CATEGORY_TITLES.keys())
+    discovered_categories = sorted({entity["category"] for entity in entities if entity.get("category")})
+    effective_categories = category_order + [category for category in discovered_categories if category not in CATEGORY_TITLES]
 
     related_counts: dict[int, Counter[int]] = defaultdict(Counter)
     for entity_ids in doc_entities.values():
@@ -767,7 +782,7 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
 
     notes: dict[str, Note] = {}
 
-    category_paths = {category: f"categories/{category}" for category in sorted(CATEGORY_TITLES)}
+    category_paths = {category: f"categories/{category}" for category in effective_categories}
     index_paths = {
         "timeline": "indexes/timeline",
         "top-mentioned": "indexes/top-mentioned",
@@ -797,7 +812,8 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
         "## Browse by Category",
         "",
     ]
-    for category, title in CATEGORY_TITLES.items():
+    for category in effective_categories:
+        title = _display_category_title(category)
         home_body.append(
             f"- {_wikilink(category_paths[category], title)} ({category_counts.get(category, 0)} pages)"
         )
@@ -819,7 +835,7 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
     for entity_id in top_entities:
         entity = entities[entity_id]
         home_body.append(
-            f"- {_wikilink(entity_note_paths[entity_id], entity['name'])} ({CATEGORY_TITLES.get(entity['category'], entity['category'])})"
+            f"- {_wikilink(entity_note_paths[entity_id], entity['name'])} ({_display_category_title(entity['category'])})"
         )
         home_links.add(entity_note_paths[entity_id])
     notes["Home"] = Note(
@@ -841,7 +857,7 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
         title = doc.get("title", doc_id)
         published_at = doc.get("published_at")
         entity_ids = doc_entities.get(doc_id, [])
-        links_to = {category_paths[entities[idx]["category"]] for idx in entity_ids}
+        links_to = {category_paths[entities[idx]["category"]] for idx in entity_ids if entities[idx]["category"] in category_paths}
         grouped: dict[str, list[int]] = defaultdict(list)
         for entity_id in entity_ids:
             grouped[entities[entity_id]["category"]].append(entity_id)
@@ -864,7 +880,7 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
         body.append("## Category Map")
         body.append("")
         for category in sorted(grouped.keys()):
-            cat_title = CATEGORY_TITLES.get(category, category.title())
+            cat_title = _display_category_title(category)
             body.append(f"### {cat_title}")
             body.append("")
             for entity_id in grouped[category]:
@@ -901,7 +917,8 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
     for idx, entity in enumerate(entities):
         entities_by_category[entity["category"]].append(idx)
 
-    for category, title in CATEGORY_TITLES.items():
+    for category in effective_categories:
+        title = _display_category_title(category)
         entity_ids = sorted(
             entities_by_category.get(category, []),
             key=lambda item: (-int(entities[item].get("mention_count", 0)), entities[item]["name"].lower()),
@@ -916,7 +933,7 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
             body = [
                 f"# {title}",
                 "",
-                CATEGORY_DESCRIPTIONS.get(category, ""),
+                _display_category_description(category),
                 "",
                 "## Reference Sections",
                 "",
@@ -941,7 +958,7 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
                     "category": category,
                     "tags": ["scene-wiki", "category", category],
                     "aliases": [category.replace("_", " ").title()],
-                    "description": CATEGORY_DESCRIPTIONS.get(category, title),
+                    "description": _display_category_description(category),
                 },
                 body=body,
                 links_to=links_to,
@@ -954,7 +971,7 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
                 shard_body = [
                     f"# {title}: {shard_title}",
                     "",
-                    f"{CATEGORY_DESCRIPTIONS.get(category, '')} This section collects the `{shard_title}` slice of the category index.",
+                    f"{_display_category_description(category)} This section collects the `{shard_title}` slice of the category index.",
                     "",
                     f"- Back to {_wikilink(category_paths[category], title)}",
                     "",
@@ -1004,7 +1021,7 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
         body = [
             f"# {title}",
             "",
-            CATEGORY_DESCRIPTIONS.get(category, ""),
+            _display_category_description(category),
             "",
             "## Reference Index",
             "",
@@ -1042,7 +1059,7 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
                 "category": category,
                 "tags": ["scene-wiki", "category", category],
                 "aliases": [category.replace("_", " ").title()],
-                "description": CATEGORY_DESCRIPTIONS.get(category, title),
+                "description": _display_category_description(category),
             },
             body=body,
             links_to=links_to,
@@ -1116,7 +1133,7 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
             "",
             "## Metadata",
             "",
-            f"- Category: {_wikilink(category_paths[category], CATEGORY_TITLES.get(category, category))}",
+            f"- Category: {_wikilink(category_paths[category], _display_category_title(category))}",
             f"- Mention count: {entity.get('mention_count', 0)}",
             f"- Issue count: {issue_count}",
             f"- First seen: {_human_date(entity.get('first_seen')) or 'Unknown'}",
@@ -1161,7 +1178,7 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
         public_entity_index[path] = {
             "title": title,
             "category": category,
-            "category_title": CATEGORY_TITLES.get(category, category.title()),
+            "category_title": _display_category_title(category),
             "mention_count": int(entity.get("mention_count", 0)),
             "issue_count": issue_count,
         }
@@ -1197,7 +1214,7 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
     for entity_id in top_entities:
         entity = entities[entity_id]
         top_lines.append(
-            f"- {_wikilink(entity_note_paths[entity_id], entity['name'])} ({entity.get('mention_count', 0)} mentions, {CATEGORY_TITLES.get(entity['category'], entity['category'])})"
+            f"- {_wikilink(entity_note_paths[entity_id], entity['name'])} ({entity.get('mention_count', 0)} mentions, {_display_category_title(entity['category'])})"
         )
         top_links.add(entity_note_paths[entity_id])
     notes[index_paths["top-mentioned"]] = Note(
