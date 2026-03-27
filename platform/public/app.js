@@ -16,7 +16,6 @@ const collectionNote = document.querySelector("#collection-note")
 const platformTagline = document.querySelector("#platform-tagline")
 const turnstileWrap = document.querySelector("#turnstile-wrap")
 const turnstileWidget = document.querySelector("#turnstile-widget")
-const statsSites = document.querySelector("#stats-sites")
 
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, {
@@ -65,7 +64,6 @@ function renderStatus(job) {
 }
 
 function renderSites(sites) {
-  statsSites.textContent = String(sites.length)
   if (!sites.length) {
     collectionNote.textContent = "No deployed scene wikis yet."
     siteList.innerHTML = `<div class="empty-state">The first generated wiki will appear here once a job completes.</div>`
