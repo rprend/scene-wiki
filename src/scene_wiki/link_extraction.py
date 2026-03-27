@@ -148,9 +148,6 @@ def extract_all_links(run_dir: Path) -> list[PostLinks]:
         return []
 
     manifest_path = run_dir / "raw" / "post-manifest.json"
-    legacy_manifest_path = run_dir / "raw" / "collected-agenda-manifest.json"
-    if not manifest_path.exists() and legacy_manifest_path.exists():
-        manifest_path = legacy_manifest_path
     manifest = read_json(manifest_path) if manifest_path.exists() else []
     url_by_doc_id = {item["doc_id"]: item["url"] for item in manifest}
 

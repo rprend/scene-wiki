@@ -2,8 +2,6 @@
 
 `scene-wiki` turns a Substack archive into a browsable Quartz wiki with semantic search.
 
-It is the extracted, general-purpose version of the wiki pipeline originally built for the Collected Agenda archive.
-
 ## What It Does
 
 Given a Substack publication URL, `scene-wiki` can:
