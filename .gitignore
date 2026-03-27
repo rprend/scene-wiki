@@ -5,9 +5,15 @@
 .venv/
 node_modules/
 .cache/
+src/*.egg-info/
+src/**/__pycache__/
+**/__pycache__/
+*.pyc
 data/
 dist/
 vault/
 wiki/content/
 wiki/public/
+wiki/quartz/.quartz-cache/
+wiki/tsconfig.tsbuildinfo
 *.log
