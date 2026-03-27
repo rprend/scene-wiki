@@ -1,0 +1,26 @@
+name = "scene-wiki-platform"
+main = "platform/worker.mjs"
+compatibility_date = "2026-03-27"
+account_id = "0e1651bc459f3017e816ba2263e0807a"
+
+[assets]
+directory = "./platform/public"
+binding = "ASSETS"
+
+[vars]
+PLATFORM_TITLE = "Scene Wiki"
+PLATFORM_TAGLINE = "Turn a Substack archive into a browseable scene wiki."
+MAIN_DOMAIN = "scene-wiki.example.com"
+PAGES_PROJECT_PREFIX = "scene-wiki"
+RUNNER_POLL_TOKEN_HEADER = "authorization"
+ALLOW_INSECURE_SUBMISSIONS = "true"
+
+[[d1_databases]]
+binding = "SCENE_WIKI_DB"
+database_name = "scene-wiki-platform"
+database_id = "90f25aa6-edcb-4fe6-a6c3-cf45d5bbd3f8"
+migrations_dir = "platform/migrations"
+
+[[kv_namespaces]]
+binding = "SCENE_WIKI_RATE_LIMITS"
+id = "9abcf85e627240c6963d571c43a05450"

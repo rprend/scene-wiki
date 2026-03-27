@@ -1,6 +1,9 @@
 # Scene Wiki
 
-`scene-wiki` turns a Substack archive into a browsable Quartz wiki with semantic search.
+`scene-wiki` now has two layers:
+
+1. the generator, which turns a Substack archive into a browsable Quartz wiki with semantic search
+2. the platform app, which accepts public submissions, tracks jobs in D1, and publishes a collection of deployed scene wikis on Cloudflare
 
 ## What It Does
 
@@ -13,6 +16,14 @@ Given a Substack publication URL, `scene-wiki` can:
 5. build a static wiki site with a right-rail archive assistant
 6. optionally deploy the built site to Cloudflare Pages
 
+The platform layer adds:
+
+1. a Quartz-adjacent landing page with a single submission form
+2. a collection page showing all deployed scene wikis
+3. D1-backed job and site metadata
+4. runner-only API endpoints for claiming jobs, heartbeats, logs, success, and failure
+5. a VM polling script that builds and deploys each wiki on its own Pages project and subdomain
+
 ## Requirements
 
 - Python 3.10+
@@ -21,6 +32,7 @@ Given a Substack publication URL, `scene-wiki` can:
 - `claude` CLI authenticated locally for entity extraction
 - `GOOGLE_API_KEY` or `GEMINI_API_KEY` for search embeddings
 - `CLOUDFLARE_ACCOUNT_ID` for deploys
+- `CLOUDFLARE_API_TOKEN` for Pages domain attachment in the platform runner
 
 ## Quickstart
 
@@ -65,6 +77,9 @@ Relevant keys:
 - `QUARTZ_PAGE_TITLE`
 - `QUARTZ_BASE_URL`
 - `WIKI_CORPUS_FILENAME`
+- `RUNNER_API_TOKEN`
+- `MAIN_DOMAIN`
+- `PLATFORM_BASE_URL`
 
 If `SUBSTACK_COOKIE` is set, the scraper will send it with requests so paid or subscriber-only posts can resolve when your session has access.
 
@@ -82,6 +97,80 @@ Then build and deploy with:
 ./scripts/build_wiki_site.sh
 ./scripts/deploy_wiki.sh
 ```
+
+## Scene Wiki Platform
+
+The Cloudflare app lives in:
+
+- `platform/worker.mjs` — API router plus static asset host
+- `platform/public/` — landing page and collection UI
+- `platform/migrations/` — D1 schema
+- `wrangler.toml` — Worker, assets, D1, and KV bindings
+- `scripts/platform_runner.py` — VM polling runner
+
+### Bootstrap Cloudflare resources
+
+Copy the runner env template and fill in the values you want to use:
+
+```bash
+cp scripts/platform.env.example .env.platform
+```
+
+Then create the Worker resources and patch `wrangler.toml` with the generated IDs:
+
+```bash
+./scripts/bootstrap_platform.sh
+```
+
+That script:
+
+- creates the D1 database if needed
+- creates the KV namespace used for rate limiting
+- writes the generated IDs into `wrangler.toml`
+- applies the D1 migrations in `platform/migrations/`
+
+### Deploy the platform
+
+Once `wrangler.toml` has real binding IDs:
+
+```bash
+./scripts/deploy_platform.sh
+```
+
+The platform Worker serves:
+
+- `GET /api/config`
+- `POST /api/jobs`
+- `GET /api/jobs/:id`
+- `GET /api/sites`
+- `POST /api/runner/claim-next`
+- `POST /api/runner/jobs/:id/event`
+- `POST /api/runner/jobs/:id/heartbeat`
+- `POST /api/runner/jobs/:id/complete`
+- `POST /api/runner/jobs/:id/fail`
+
+### Run the VM worker
+
+On the VM that has `scene-wiki`, `claude`, Wrangler, and your generation secrets installed:
+
+```bash
+python3 scripts/platform_runner.py --env-file .env.platform
+```
+
+That loop will:
+
+1. claim the next queued job from the Worker
+2. run `scene-wiki build-substack`
+3. create or reuse a Pages project for the slug
+4. deploy the output bundle
+5. attach `<slug>.<MAIN_DOMAIN>` as the custom domain
+6. mark the job deployed or failed in D1
+
+### Current platform constraints
+
+- public submissions currently accept only `*.substack.com` publication roots
+- Turnstile verification is enforced only when `TURNSTILE_SECRET_KEY` is set; local/dev mode can opt into insecure submissions by setting `ALLOW_INSECURE_SUBMISSIONS=true`
+- custom domain attachment assumes the main domain is already on the same Cloudflare account
 
 ## Repo Layout
 

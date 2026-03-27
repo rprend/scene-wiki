@@ -1,8 +1,10 @@
 .DS_Store
 .env
+.env.platform
 .dev.vars
 .scene-wiki.env
 .venv/
+.wrangler/
 node_modules/
 .cache/
 src/*.egg-info/

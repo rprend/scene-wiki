@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Scene Wiki</title>
+    <meta
+      name="description"
+      content="Paste a Substack publication URL to generate a Quartz-style scene wiki and browse the collection."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,700&family=Schibsted+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+  </head>
+  <body>
+    <div class="paper"></div>
+    <main class="layout">
+      <header class="hero">
+        <p class="eyebrow">Scene Wiki Collection</p>
+        <h1>Turn a scene archive into a public wiki.</h1>
+        <p class="lede" id="platform-tagline">
+          Paste a Substack publication root, queue a long-running build, and publish the finished wiki on its own subdomain.
+        </p>
+        <form class="submit-form" id="submit-form">
+          <label class="field-label" for="source-url">Publication URL</label>
+          <div class="submit-row">
+            <input
+              id="source-url"
+              name="source-url"
+              type="url"
+              inputmode="url"
+              autocomplete="url"
+              placeholder="https://example.substack.com"
+              required
+            />
+            <button type="submit" id="submit-button">Create wiki</button>
+          </div>
+          <div class="turnstile-wrap hidden" id="turnstile-wrap">
+            <div id="turnstile-widget"></div>
+          </div>
+          <p class="form-note">
+            v1 supports Substack publication roots. Duplicate submissions resolve to the existing site or in-flight job.
+          </p>
+        </form>
+        <section class="status-panel hidden" id="status-panel" aria-live="polite">
+          <h2>Job status</h2>
+          <div id="status-body"></div>
+        </section>
+      </header>
+
+      <section class="collection">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Published wikis</p>
+            <h2>The collection</h2>
+          </div>
+          <p class="collection-note" id="collection-note">Loading deployed scene wikis…</p>
+        </div>
+        <div class="site-list" id="site-list"></div>
+      </section>
+    </main>
+    <script src="/app.js" defer></script>
+  </body>
+  </html>
