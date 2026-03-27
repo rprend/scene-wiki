@@ -21,13 +21,20 @@ def scrape_substack_command(
     archive_url: str,
     subject: Optional[str] = None,
     section_slug: Optional[str] = None,
+    max_articles: Optional[int] = None,
     run_dir: Optional[Path] = None,
 ) -> None:
+    typer.echo(f"Scraping Substack archive: {archive_url}")
     result = scrape_substack_archive(
         archive_url,
         subject=subject,
         section_slug=section_slug,
+        max_articles=max_articles,
         run_dir=run_dir,
+    )
+    typer.echo(
+        f"Saved {result['posts_saved']} posts from {result['archive_posts_selected']} selected archive entries "
+        f"into {result['run_dir']}"
     )
     typer.echo(result["run_dir"])
 
@@ -72,6 +79,7 @@ def build_substack_command(
     archive_url: str,
     subject: Optional[str] = None,
     section_slug: Optional[str] = None,
+    max_articles: Optional[int] = None,
     model: str = "sonnet",
     workers: int = 10,
     quartz_concurrency: int = 3,
@@ -87,15 +95,23 @@ def build_substack_command(
         os.environ["SCENE_WIKI_TITLE"] = site_title
         os.environ["QUARTZ_PAGE_TITLE"] = site_title
 
+    typer.echo(f"Scraping Substack archive: {archive_url}")
     scrape_result = scrape_substack_archive(
         archive_url,
         subject=subject,
         section_slug=section_slug,
+        max_articles=max_articles,
         run_dir=run_dir,
     )
     actual_run_dir = Path(scrape_result["run_dir"])
     actual_vault_dir = vault_dir or Path("vault") / actual_run_dir.name
+    typer.echo(
+        f"Saved {scrape_result['posts_saved']} posts from {scrape_result['archive_posts_selected']} selected archive entries "
+        f"into {actual_run_dir}"
+    )
+    typer.echo(f"Building newsletter corpus in {actual_run_dir}")
     build_newsletter_corpus(run_dir=actual_run_dir, model=model, workers=workers)
+    typer.echo(f"Building full site into {output_dir.resolve()}")
     result = build_full_site(
         run_dir=actual_run_dir,
         wiki_dir=wiki_dir.resolve(),
@@ -103,6 +119,7 @@ def build_substack_command(
         vault_dir=actual_vault_dir.resolve(),
         quartz_concurrency=quartz_concurrency,
     )
+    typer.echo(f"Site build complete: {result['output_dir']}")
     typer.echo(result["output_dir"])
 
 

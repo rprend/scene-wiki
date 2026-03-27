@@ -41,6 +41,11 @@ export default {
         return await handleGetJob(env, jobMatch[1])
       }
 
+      const jobEventsMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/events$/)
+      if (request.method === "GET" && jobEventsMatch) {
+        return await handleGetJobEvents(env, jobEventsMatch[1])
+      }
+
       if (url.pathname.startsWith("/api/runner/")) {
         requireRunnerToken(request, env)
         if (request.method === "POST" && url.pathname === "/api/runner/claim-next") {
@@ -379,6 +384,33 @@ async function handleGetJob(env, jobId) {
   }
 
   return jsonResponse({ job: mapJobRecord(job) })
+}
+
+async function handleGetJobEvents(env, jobId) {
+  const job = await env.SCENE_WIKI_DB.prepare(`SELECT id FROM jobs WHERE id = ?`).bind(jobId).first()
+  if (!job) {
+    throw new HttpError(404, "Job not found.")
+  }
+
+  const { results } = await env.SCENE_WIKI_DB.prepare(
+    `SELECT id, level, message, payload_json, created_at
+     FROM job_events
+     WHERE job_id = ?
+     ORDER BY created_at ASC
+     LIMIT 500`,
+  )
+    .bind(jobId)
+    .all()
+
+  return jsonResponse({
+    events: results.map((row) => ({
+      id: row.id,
+      level: row.level,
+      message: row.message,
+      payload: row.payload_json ? JSON.parse(row.payload_json) : null,
+      createdAt: row.created_at,
+    })),
+  })
 }
 
 async function handleCreateJob(request, env) {

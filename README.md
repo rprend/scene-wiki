@@ -80,6 +80,7 @@ Relevant keys:
 - `RUNNER_API_TOKEN`
 - `MAIN_DOMAIN`
 - `PLATFORM_BASE_URL`
+- `SCENE_WIKI_MAX_ARTICLES`
 
 If `SUBSTACK_COOKIE` is set, the scraper will send it with requests so paid or subscriber-only posts can resolve when your session has access.
 
@@ -142,6 +143,7 @@ The platform Worker serves:
 - `GET /api/config`
 - `POST /api/jobs`
 - `GET /api/jobs/:id`
+- `GET /api/jobs/:id/events`
 - `GET /api/sites`
 - `POST /api/runner/claim-next`
 - `POST /api/runner/jobs/:id/event`
@@ -166,9 +168,21 @@ That loop will:
 5. attach `<slug>.<MAIN_DOMAIN>` as the custom domain, for example `example.scenewiki.net`
 6. mark the job deployed or failed in D1
 
+For debug runs, you can cap the build size:
+
+```bash
+scene-wiki build-substack \
+  https://www.astralcodexten.com \
+  --subject "Astral Codex Ten" \
+  --site-title "Astral Codex Ten" \
+  --max-articles 1
+```
+
+The platform runner also honors `SCENE_WIKI_MAX_ARTICLES`, and writes a per-job log file under `logs/jobs/<job-id>.log`.
+
 ### Current platform constraints
 
-- public submissions currently accept only `*.substack.com` publication roots
+- public submissions accept Substack publication roots, including custom-domain Substacks that expose the standard archive API
 - Turnstile verification is enforced only when `TURNSTILE_SECRET_KEY` is set; local/dev mode can opt into insecure submissions by setting `ALLOW_INSECURE_SUBMISSIONS=true`
 - the collection app is intended to live at `scenewiki.net`
 - generated wikis are intended to live at `<slug>.scenewiki.net`

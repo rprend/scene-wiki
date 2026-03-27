@@ -176,7 +176,7 @@ def get_with_retries(client: httpx.Client, url: str, **kwargs: Any) -> httpx.Res
     raise RuntimeError(f"Request failed without an exception for {url}")
 
 
-def fetch_archive_posts(client: httpx.Client, archive_url: str) -> list[dict[str, Any]]:
+def fetch_archive_posts(client: httpx.Client, archive_url: str, max_posts: int | None = None) -> list[dict[str, Any]]:
     base = archive_url.rstrip("/")
     all_posts: list[dict[str, Any]] = []
     seen_ids: set[int] = set()
@@ -199,6 +199,8 @@ def fetch_archive_posts(client: httpx.Client, archive_url: str) -> list[dict[str
                 seen_ids.add(post_id)
                 all_posts.append(item)
                 new_count += 1
+                if max_posts is not None and len(all_posts) >= max_posts:
+                    return all_posts
 
         if len(batch) < ARCHIVE_PAGE_SIZE or new_count == 0:
             break
@@ -244,6 +246,7 @@ def scrape_substack_archive(
     *,
     subject: str | None = None,
     section_slug: str | None = None,
+    max_articles: int | None = None,
     run_dir: Path | None = None,
 ) -> dict[str, Any]:
     parsed = urlparse(archive_url)
@@ -264,10 +267,12 @@ def scrape_substack_archive(
     subject_name = subject or infer_subject(archive_url, section_slug=section_slug)
 
     with httpx.Client(headers=headers, follow_redirects=True, timeout=DEFAULT_TIMEOUT) as client:
-        archive_posts = fetch_archive_posts(client, archive_url)
+        archive_posts = fetch_archive_posts(client, archive_url, max_posts=max_articles)
         filtered_posts = archive_posts
         if section_slug:
             filtered_posts = [post for post in archive_posts if post.get("section_slug") == section_slug]
+        if max_articles is not None:
+            filtered_posts = filtered_posts[:max_articles]
 
         extracted_posts: list[ExtractedPost] = []
         for post in filtered_posts:
@@ -353,6 +358,7 @@ def scrape_substack_archive(
         "archive_url": archive_url,
         "section_slug": section_slug,
         "archive_posts_seen": len(archive_posts),
+        "archive_posts_selected": len(filtered_posts),
         "posts_saved": len(documents),
         "full_posts": sum(1 for item in manifest if item["body_kind"] == "full"),
         "preview_only_posts": sum(1 for item in manifest if item["body_kind"] == "preview"),
@@ -360,9 +366,7 @@ def scrape_substack_archive(
     write_json(run_dir / "artifacts" / "summary.json", summary)
 
     return {
-        "run_dir": str(run_dir),
-        "archive_url": archive_url,
+        **summary,
         "subject": subject_name,
         "post_count": len(documents),
-        "section_slug": section_slug,
     }
