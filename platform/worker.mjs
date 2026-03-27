@@ -196,18 +196,6 @@ async function allocateSiteSlug(env, title, sourceUrl) {
   return `${baseSlug}-${shortHash(sourceUrl)}`
 }
 
-async function migrateSiteSlug(env, oldSlug, newSlug) {
-  const timestamp = nowIso()
-  await env.SCENE_WIKI_DB.batch([
-    env.SCENE_WIKI_DB.prepare(
-      `UPDATE jobs SET site_slug = ?, updated_at = ? WHERE site_slug = ?`,
-    ).bind(newSlug, timestamp, oldSlug),
-    env.SCENE_WIKI_DB.prepare(
-      `UPDATE sites SET slug = ?, updated_at = ? WHERE slug = ?`,
-    ).bind(newSlug, timestamp, oldSlug),
-  ])
-}
-
 function deriveTitleFromHost(hostname) {
   const label = hostname.replace(/\.substack\.com$/, "").replace(/^www\./, "")
   return label
@@ -547,33 +535,7 @@ async function handleCreateJob(request, env) {
   }
 
   if (existingSite && existingSite.slug !== slug) {
-    const existingActiveJobForSlug = await env.SCENE_WIKI_DB.prepare(
-      `SELECT id
-       FROM jobs
-       WHERE site_slug = ? AND status IN ('queued', 'running')
-       LIMIT 1`,
-    )
-      .bind(existingSite.slug)
-      .first()
-
-    if (!existingActiveJobForSlug) {
-      const targetSlug = await env.SCENE_WIKI_DB.prepare(
-        `SELECT slug, source_url
-         FROM sites
-         WHERE slug = ?
-         LIMIT 1`,
-      )
-        .bind(slug)
-        .first()
-
-      if (!targetSlug || targetSlug.source_url === sourceUrl) {
-        await migrateSiteSlug(env, existingSite.slug, slug)
-      } else {
-        slug = existingSite.slug
-      }
-    } else {
-      slug = existingSite.slug
-    }
+    slug = existingSite.slug
   }
 
   const existingActiveJob = await env.SCENE_WIKI_DB.prepare(
