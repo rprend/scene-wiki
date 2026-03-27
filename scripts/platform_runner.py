@@ -31,7 +31,14 @@ def require_env(name: str) -> str:
 
 def api_request(base_url: str, path: str, method: str = "GET", payload: dict | None = None) -> dict:
     url = f"{base_url.rstrip('/')}{path}"
-    headers = {"Accept": "application/json"}
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": (
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 SceneWikiRunner/1.0"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
+    }
     token = require_env("RUNNER_API_TOKEN")
     headers["Authorization"] = f"Bearer {token}"
     data = None
