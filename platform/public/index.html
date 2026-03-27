@@ -11,124 +11,146 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,700&family=Schibsted+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;700&family=Source+Sans+Pro:ital,wght@0,400;0,600;1,400;1,600&family=IBM+Plex+Mono:wght@400;600&display=swap"
       rel="stylesheet"
     />
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin="anonymous" />
+    <link href="https://scene-wiki-demo.pages.dev/index.css" rel="stylesheet" type="text/css" />
     <link rel="stylesheet" href="/styles.css" />
     <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
   </head>
-  <body>
-    <header class="topbar">
-      <a class="brand" href="/">Scene Wiki</a>
-      <nav class="top-actions" aria-label="Theme and utility">
-        <button type="button" class="top-action" disabled>Light mode</button>
-        <button type="button" class="top-action" disabled>Search</button>
-      </nav>
-    </header>
-
-    <main class="layout">
-      <aside class="left-rail">
-        <div class="rail-block">
-          <h2 class="rail-title"><a href="/">Scene Wiki</a></h2>
-          <p class="rail-copy">
-            A collection of generated scene wikis built from newsletters, blogs, and publication archives.
-          </p>
+  <body data-slug="index">
+    <div id="quartz-root" class="page has-right-sidebar">
+      <div id="quartz-body">
+        <div class="left sidebar">
+          <h2 class="page-title"><a href="/">Scene Wiki</a></h2>
+          <div class="spacer mobile-only"></div>
+          <div class="flex-component" style="flex-direction: row; flex-wrap: nowrap; gap: 1rem;">
+            <div style="flex-grow: 0; flex-shrink: 1; flex-basis: auto; order: 0; align-self: center; justify-self: center;">
+              <button class="darkmode" disabled>Light mode</button>
+            </div>
+            <div style="flex-grow: 0; flex-shrink: 1; flex-basis: auto; order: 0; align-self: center; justify-self: center;">
+              <button class="readermode" disabled>Reader mode</button>
+            </div>
+          </div>
+          <div class="search">
+            <button class="search-button" disabled><p>Search</p></button>
+          </div>
+          <div class="explorer">
+            <button type="button" class="title-button explorer-toggle desktop-explorer" aria-expanded="true">
+              <h2>Atlas</h2>
+            </button>
+            <div class="explorer-content" aria-expanded="true" role="group">
+              <ul class="explorer-ul">
+                <li><a href="#submit">Create a Scene Wiki</a></li>
+                <li><a href="#snapshot">Atlas Snapshot</a></li>
+                <li><a href="#collection">Browse the Collection</a></li>
+                <li><a href="#entry-points">Entry Points</a></li>
+              </ul>
+            </div>
+          </div>
         </div>
 
-        <div class="rail-block">
-          <h3>Collection Atlas</h3>
-          <ul class="rail-list">
-            <li><a href="#submit">Create a new wiki</a></li>
-            <li><a href="#snapshot">Atlas Snapshot</a></li>
-            <li><a href="#collection">Browse the Collection</a></li>
-            <li><a href="#entry-points">Entry Points</a></li>
-          </ul>
-        </div>
-      </aside>
-
-      <article class="page">
-        <p class="breadcrumbs">
-          <a href="/">scene-wiki</a>
-          <span>home</span>
-        </p>
-        <h1>Scene Wiki</h1>
-        <p class="page-meta">Mar 27, 2026 · 1 min read</p>
-        <p class="lede" id="platform-tagline">
-          Paste a Substack publication root, queue a long-running build, and publish the finished wiki on its own subdomain.
-        </p>
-
-        <section class="article-section" id="submit">
-          <h2>Create a Scene Wiki</h2>
-          <p>
-            Scene Wiki accepts a publication root, runs the scene-mapping pipeline in the background, and publishes the finished Quartz-style wiki at a dedicated subdomain of <code>scenewiki.net</code>.
-          </p>
-          <form class="submit-form" id="submit-form">
-            <label class="field-label" for="source-url">Publication URL</label>
-            <div class="submit-row">
-              <input
-                id="source-url"
-                name="source-url"
-                type="url"
-                inputmode="url"
-                autocomplete="url"
-                placeholder="https://example.substack.com"
-                required
-              />
-              <button type="submit" id="submit-button">Create wiki</button>
+        <div class="center">
+          <div class="page-header">
+            <div class="popover-hint">
+              <h1 class="article-title">Scene Wiki</h1>
+              <p show-comma="true" class="content-meta">
+                <time datetime="2026-03-27">Mar 27, 2026</time>
+                <span>1 min read</span>
+              </p>
+              <ul class="tags">
+                <li><a href="#collection" class="internal tag-link">scene-wiki</a></li>
+                <li><a href="#submit" class="internal tag-link">home</a></li>
+              </ul>
             </div>
-            <div class="turnstile-wrap hidden" id="turnstile-wrap">
-              <div id="turnstile-widget"></div>
-            </div>
-            <p class="form-note">
-              v1 supports Substack publication roots. Duplicate submissions resolve to the existing site or in-flight job.
+          </div>
+
+          <article class="popover-hint">
+            <h1 id="scene-wiki">Scene Wiki</h1>
+            <p id="platform-tagline">
+              Paste a Substack publication root, queue a long-running build, and publish the finished wiki on its own subdomain.
             </p>
-          </form>
-        </section>
 
-        <section class="article-section hidden" id="status-section">
-          <h2>Job Status</h2>
-          <section class="status-panel hidden" id="status-panel" aria-live="polite">
-            <div id="status-body"></div>
-          </section>
-        </section>
+            <h2 id="submit">Create a Scene Wiki</h2>
+            <p>
+              Scene Wiki accepts a publication root, runs the scene-mapping pipeline in the background, and publishes the finished Quartz-style wiki at a dedicated subdomain of <code>scenewiki.net</code>.
+            </p>
+            <form class="collection-form" id="submit-form">
+              <label class="field-label" for="source-url">Publication URL</label>
+              <div class="submit-row">
+                <input
+                  id="source-url"
+                  name="source-url"
+                  type="url"
+                  inputmode="url"
+                  autocomplete="url"
+                  placeholder="https://example.substack.com"
+                  required
+                />
+                <button type="submit" id="submit-button">Create wiki</button>
+              </div>
+              <div class="turnstile-wrap hidden" id="turnstile-wrap">
+                <div id="turnstile-widget"></div>
+              </div>
+              <p class="form-note">
+                v1 supports Substack publication roots. Duplicate submissions resolve to the existing site or in-flight job.
+              </p>
+            </form>
 
-        <section class="article-section" id="snapshot">
-          <h2>Atlas Snapshot</h2>
-          <ul class="plain-list">
-            <li><span id="stats-sites">0</span> deployed scene wikis</li>
-            <li>Collection app live on <a href="https://scenewiki.net">scenewiki.net</a></li>
-            <li>Every generated wiki publishes to <code>&lt;slug&gt;.scenewiki.net</code></li>
-          </ul>
-        </section>
+            <section class="status-section hidden" id="status-section">
+              <h2 id="job-status">Job Status</h2>
+              <section class="status-panel hidden" id="status-panel" aria-live="polite">
+                <div id="status-body"></div>
+              </section>
+            </section>
 
-        <section class="article-section" id="collection">
-          <h2>Browse the Collection</h2>
-          <p class="collection-note" id="collection-note">Loading deployed scene wikis…</p>
-          <div class="site-list" id="site-list"></div>
-        </section>
+            <h2 id="snapshot">Atlas Snapshot</h2>
+            <ul>
+              <li><span id="stats-sites">0</span> deployed scene wikis</li>
+              <li>Collection app live on <a href="https://scenewiki.net">scenewiki.net</a></li>
+              <li>Every generated wiki publishes to <code>&lt;slug&gt;.scenewiki.net</code></li>
+            </ul>
 
-        <section class="article-section" id="entry-points">
-          <h2>Entry Points</h2>
-          <ul class="plain-list muted">
-            <li>Use the homepage form to create a new scene wiki from a Substack archive.</li>
-            <li>Browse published wikis once they finish building and deploy to their subdomains.</li>
-            <li>Use the generated wiki itself for search, backlinks, categories, and source browsing.</li>
-          </ul>
-        </section>
-      </article>
+            <h2 id="collection">Browse the Collection</h2>
+            <p class="collection-note" id="collection-note">Loading deployed scene wikis…</p>
+            <div class="site-list" id="site-list"></div>
 
-      <aside class="right-rail">
-        <div class="toc-block">
-          <h3>Table of Contents</h3>
-          <ul class="toc-list">
-            <li><a href="#submit">Create a Scene Wiki</a></li>
-            <li><a href="#snapshot">Atlas Snapshot</a></li>
-            <li><a href="#collection">Browse the Collection</a></li>
-            <li><a href="#entry-points">Entry Points</a></li>
-          </ul>
+            <h2 id="entry-points">Entry Points</h2>
+            <ul>
+              <li>Use the homepage form to create a new scene wiki from a Substack archive.</li>
+              <li>Browse published wikis once they finish building and deploy to their subdomains.</li>
+              <li>Use the generated wiki itself for search, backlinks, categories, and source browsing.</li>
+            </ul>
+
+            <h2 id="backlinks">Backlinks</h2>
+            <p>No other generated pages link here yet.</p>
+          </article>
+          <hr />
+          <div class="page-footer"></div>
         </div>
-      </aside>
-    </main>
+
+        <div class="right sidebar">
+          <div class="semantic-search-rail">
+            <h3>Table of Contents</h3>
+            <ul>
+              <li><a href="#submit">Create a Scene Wiki</a></li>
+              <li><a href="#snapshot">Atlas Snapshot</a></li>
+              <li><a href="#collection">Browse the Collection</a></li>
+              <li><a href="#entry-points">Entry Points</a></li>
+            </ul>
+          </div>
+        </div>
+
+        <footer>
+          <p>Created with <a href="https://quartz.jzhao.xyz/">Quartz v4.5.2</a> © 2026</p>
+          <ul>
+            <li><a href="#collection">Collection</a></li>
+            <li><a href="#submit">Create Wiki</a></li>
+          </ul>
+        </footer>
+      </div>
+    </div>
     <script src="/app.js" defer></script>
   </body>
   </html>
