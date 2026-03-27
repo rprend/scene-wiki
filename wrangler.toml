@@ -10,10 +10,14 @@ binding = "ASSETS"
 [vars]
 PLATFORM_TITLE = "Scene Wiki"
 PLATFORM_TAGLINE = "Turn a Substack archive into a browseable scene wiki."
-MAIN_DOMAIN = "scene-wiki.example.com"
+MAIN_DOMAIN = "scenewiki.net"
 PAGES_PROJECT_PREFIX = "scene-wiki"
 RUNNER_POLL_TOKEN_HEADER = "authorization"
 ALLOW_INSECURE_SUBMISSIONS = "true"
+
+[[routes]]
+pattern = "scenewiki.net"
+custom_domain = true
 
 [[d1_databases]]
 binding = "SCENE_WIKI_DB"

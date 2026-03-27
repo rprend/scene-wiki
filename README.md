@@ -163,14 +163,16 @@ That loop will:
 2. run `scene-wiki build-substack`
 3. create or reuse a Pages project for the slug
 4. deploy the output bundle
-5. attach `<slug>.<MAIN_DOMAIN>` as the custom domain
+5. attach `<slug>.<MAIN_DOMAIN>` as the custom domain, for example `example.scenewiki.net`
 6. mark the job deployed or failed in D1
 
 ### Current platform constraints
 
 - public submissions currently accept only `*.substack.com` publication roots
 - Turnstile verification is enforced only when `TURNSTILE_SECRET_KEY` is set; local/dev mode can opt into insecure submissions by setting `ALLOW_INSECURE_SUBMISSIONS=true`
-- custom domain attachment assumes the main domain is already on the same Cloudflare account
+- the collection app is intended to live at `scenewiki.net`
+- generated wikis are intended to live at `<slug>.scenewiki.net`
+- custom domain attachment assumes `scenewiki.net` is active on the same Cloudflare account
 
 ## Repo Layout
 

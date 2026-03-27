@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
 
+from openai import OpenAI
 from pydantic import BaseModel, Field
 
 from .chunking import chunk_documents
@@ -147,6 +148,59 @@ def extract_newsletter_chunk_claude(
         return NewsletterExtractionBatch(items=[])
 
 
+def extract_newsletter_chunk_openai(
+    subject: str,
+    chunk_text: str,
+    model: str | None = None,
+) -> NewsletterExtractionBatch:
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY is not set.")
+
+    prompt = NEWSLETTER_EXTRACTION_PROMPT.replace("SUBJECT_PLACEHOLDER", subject).replace("TEXT_PLACEHOLDER", chunk_text)
+    client = OpenAI(api_key=api_key)
+    response = client.responses.create(
+        model=model or os.getenv("SCENE_WIKI_EXTRACTION_OPENAI_MODEL", "gpt-4.1-mini"),
+        input=prompt,
+        max_output_tokens=4000,
+    )
+    text_content = response.output_text.strip()
+    if "```json" in text_content:
+        text_content = text_content.split("```json", 1)[1].split("```", 1)[0].strip()
+    elif "```" in text_content:
+        text_content = text_content.split("```", 1)[1].split("```", 1)[0].strip()
+
+    if not text_content.startswith("{"):
+        start = text_content.find("{")
+        end = text_content.rfind("}")
+        if start >= 0 and end > start:
+            text_content = text_content[start:end + 1]
+
+    try:
+        data = json.loads(text_content)
+        return NewsletterExtractionBatch.model_validate(data)
+    except (json.JSONDecodeError, Exception) as exc:
+        print(f"    Failed to parse OpenAI extraction response: {exc}", flush=True)
+        print(f"    Raw output (first 300 chars): {text_content[:300]}", flush=True)
+        return NewsletterExtractionBatch(items=[])
+
+
+def extract_newsletter_chunk(
+    subject: str,
+    chunk_text: str,
+    model: str = "sonnet",
+) -> NewsletterExtractionBatch:
+    backend = os.getenv("SCENE_WIKI_EXTRACTION_BACKEND", "").strip().lower()
+    if backend == "openai":
+        return extract_newsletter_chunk_openai(subject=subject, chunk_text=chunk_text, model=None)
+    if backend == "claude":
+        return extract_newsletter_chunk_claude(subject=subject, chunk_text=chunk_text, model=model)
+
+    if os.getenv("OPENAI_API_KEY", "").strip():
+        return extract_newsletter_chunk_openai(subject=subject, chunk_text=chunk_text, model=None)
+    return extract_newsletter_chunk_claude(subject=subject, chunk_text=chunk_text, model=model)
+
+
 def _extract_single_chunk(
     chunk,
     doc_by_id: dict[str, NormalizedDocument],
@@ -166,7 +220,7 @@ def _extract_single_chunk(
         except (json.JSONDecodeError, KeyError):
             pass
 
-    batch = extract_newsletter_chunk_claude(subject=subject, chunk_text=chunk.text, model=model)
+    batch = extract_newsletter_chunk(subject=subject, chunk_text=chunk.text, model=model)
     doc = doc_by_id.get(chunk.doc_id)
     published_at = doc.published_at if doc else None
 
