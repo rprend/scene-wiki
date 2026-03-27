@@ -15,9 +15,7 @@ body[data-slug="index"] .center {
 
 body[data-slug="index"] .left.sidebar,
 body[data-slug="index"] .right.sidebar,
-body[data-slug="index"] footer,
-body[data-slug="index"] .page-footer,
-body[data-slug="index"] hr {
+body[data-slug="index"] footer {
   display: none !important;
 }
 
@@ -27,6 +25,16 @@ body[data-slug="index"] .page-header {
 
 body[data-slug="index"] .content-meta {
   margin-top: 0.5rem;
+}
+
+body[data-slug="index"] hr {
+  margin-top: 2rem;
+}
+
+body[data-slug="index"] .page-footer {
+  margin-top: 1rem;
+  color: var(--gray);
+  font-size: 0.95rem;
 }
 
 body[data-slug="index"] .page-header {
