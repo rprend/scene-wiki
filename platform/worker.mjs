@@ -129,6 +129,87 @@ function shortHash(value) {
   return hash.toString(36).slice(0, 6)
 }
 
+async function urlLooksLive(url) {
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      redirect: "manual",
+      headers: {
+        accept: "text/html,application/xhtml+xml",
+        "user-agent": "SceneWikiBot/1.0 (+https://scenewiki.net)",
+      },
+      cf: {
+        cacheTtl: 0,
+        cacheEverything: false,
+      },
+    })
+    return response.status >= 200 && response.status < 500
+  } catch {
+    return false
+  }
+}
+
+async function siteRecordLooksReachable(site) {
+  if (site?.custom_domain) {
+    if (await urlLooksLive(`https://${site.custom_domain}`)) {
+      return true
+    }
+  }
+  if (site?.pages_url) {
+    if (await urlLooksLive(site.pages_url)) {
+      return true
+    }
+  }
+  return false
+}
+
+async function allocateSiteSlug(env, title, sourceUrl) {
+  const baseSlug = slugify(title).slice(0, 40)
+  const { results } = await env.SCENE_WIKI_DB.prepare(
+    `SELECT slug, source_url
+     FROM sites
+     WHERE slug = ?
+        OR slug GLOB ?`,
+  )
+    .bind(baseSlug, `${baseSlug}-*`)
+    .all()
+
+  const exactForSource = results.find((row) => row.source_url === sourceUrl)
+  const baseOwnedByOtherSource = results.some((row) => row.slug === baseSlug && row.source_url !== sourceUrl)
+  if (exactForSource && exactForSource.slug !== baseSlug && !baseOwnedByOtherSource) {
+    return baseSlug
+  }
+  if (exactForSource) {
+    return exactForSource.slug
+  }
+
+  const used = new Set(results.map((row) => row.slug))
+  if (!used.has(baseSlug)) {
+    return baseSlug
+  }
+
+  for (let suffix = 2; suffix < 1000; suffix += 1) {
+    const candidate = `${baseSlug}-${suffix}`
+    if (!used.has(candidate)) {
+      return candidate
+    }
+  }
+
+  return `${baseSlug}-${shortHash(sourceUrl)}`
+}
+
+async function migrateSiteSlug(env, oldSlug, newSlug) {
+  const timestamp = nowIso()
+  await env.SCENE_WIKI_DB.batch([
+    env.SCENE_WIKI_DB.prepare(
+      `UPDATE jobs SET site_slug = ?, updated_at = ? WHERE site_slug = ?`,
+    ).bind(newSlug, timestamp, oldSlug),
+    env.SCENE_WIKI_DB.prepare(
+      `UPDATE sites SET slug = ?, updated_at = ? WHERE slug = ?`,
+    ).bind(newSlug, timestamp, oldSlug),
+  ])
+}
+
 function deriveTitleFromHost(hostname) {
   const label = hostname.replace(/\.substack\.com$/, "").replace(/^www\./, "")
   return label
@@ -419,7 +500,7 @@ async function handleCreateJob(request, env) {
   const turnstileToken = typeof body.turnstileToken === "string" ? body.turnstileToken : ""
   const ip = request.headers.get("cf-connecting-ip") || ""
   const { sourceUrl, sourceType, title } = await resolveSourceUrl(sourceUrlRaw)
-  const slug = `${slugify(title).slice(0, 40)}-${shortHash(sourceUrl)}`
+  let slug = await allocateSiteSlug(env, title, sourceUrl)
 
   const rateBucket = await getRateBucket(env, ip)
   if (rateBucket.count >= 5) {
@@ -433,12 +514,14 @@ async function handleCreateJob(request, env) {
 
   const existingSite = await env.SCENE_WIKI_DB.prepare(
     `SELECT slug, title, source_url, source_type, status, pages_project_name, pages_url, custom_domain, updated_at
-     FROM sites WHERE source_url = ?`,
+     FROM sites WHERE source_url = ?
+     ORDER BY updated_at DESC
+     LIMIT 1`,
   )
     .bind(sourceUrl)
     .first()
 
-  if (existingSite && PUBLIC_SITE_STATUSES.has(existingSite.status)) {
+  if (existingSite && PUBLIC_SITE_STATUSES.has(existingSite.status) && await siteRecordLooksReachable(existingSite)) {
     const existingJob = await env.SCENE_WIKI_DB.prepare(
       `SELECT id, site_slug, source_url, source_type, status, queue_time, started_at, heartbeat_at,
               finished_at, updated_at, error_message, run_dir, pages_project_name, pages_url, custom_domain
@@ -452,6 +535,46 @@ async function handleCreateJob(request, env) {
 
     if (existingJob) {
       return jsonResponse({ duplicate: true, job: mapJobRecord(existingJob), site: mapSiteRecord(existingSite) })
+    }
+  }
+
+  if (existingSite && PUBLIC_SITE_STATUSES.has(existingSite.status) && !(await siteRecordLooksReachable(existingSite))) {
+    await env.SCENE_WIKI_DB.prepare(
+      `UPDATE sites
+       SET status = 'failed', last_error_message = ?, updated_at = ?
+       WHERE slug = ?`,
+    )
+      .bind("Saved deployment was not reachable. Retry queued.", nowIso(), existingSite.slug)
+      .run()
+  }
+
+  if (existingSite && existingSite.slug !== slug) {
+    const existingActiveJobForSlug = await env.SCENE_WIKI_DB.prepare(
+      `SELECT id
+       FROM jobs
+       WHERE site_slug = ? AND status IN ('queued', 'running')
+       LIMIT 1`,
+    )
+      .bind(existingSite.slug)
+      .first()
+
+    if (!existingActiveJobForSlug) {
+      const targetSlug = await env.SCENE_WIKI_DB.prepare(
+        `SELECT slug, source_url
+         FROM sites
+         WHERE slug = ?
+         LIMIT 1`,
+      )
+        .bind(slug)
+        .first()
+
+      if (!targetSlug || targetSlug.source_url === sourceUrl) {
+        await migrateSiteSlug(env, existingSite.slug, slug)
+      } else {
+        slug = existingSite.slug
+      }
+    } else {
+      slug = existingSite.slug
     }
   }
 
