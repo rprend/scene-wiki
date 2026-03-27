@@ -13,7 +13,6 @@ const statusSection = document.querySelector("#status-section")
 const statusBody = document.querySelector("#status-body")
 const siteList = document.querySelector("#site-list")
 const collectionNote = document.querySelector("#collection-note")
-const platformTagline = document.querySelector("#platform-tagline")
 const turnstileWrap = document.querySelector("#turnstile-wrap")
 const turnstileWidget = document.querySelector("#turnstile-widget")
 
@@ -92,9 +91,6 @@ function renderSites(sites) {
 
 async function loadConfig() {
   state.config = await fetchJson("/api/config")
-  if (state.config.tagline) {
-    platformTagline.textContent = state.config.tagline
-  }
   if (state.config.turnstileSiteKey && turnstileWidget) {
     turnstileWrap.classList.remove("hidden")
     const renderWidget = () => {
