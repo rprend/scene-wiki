@@ -151,9 +151,7 @@ async function urlLooksLive(url) {
 
 async function siteRecordLooksReachable(site) {
   if (site?.custom_domain) {
-    if (await urlLooksLive(`https://${site.custom_domain}`)) {
-      return true
-    }
+    return await urlLooksLive(`https://${site.custom_domain}`)
   }
   if (site?.pages_url) {
     if (await urlLooksLive(site.pages_url)) {
