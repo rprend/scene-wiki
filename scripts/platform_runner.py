@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import time
@@ -87,6 +88,39 @@ def format_seconds(seconds: float | None) -> str | None:
     if minutes:
         return f"{minutes}m {secs}s"
     return f"{secs}s"
+
+
+def site_url_is_live(url: str) -> bool:
+    request = urllib.request.Request(
+        url,
+        method="GET",
+        headers={
+            "User-Agent": "SceneWikiRunner/1.0",
+            "Accept": "text/html,application/xhtml+xml",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            return 200 <= response.status < 500
+    except urllib.error.HTTPError as exc:
+        return 200 <= exc.code < 500
+    except urllib.error.URLError:
+        return False
+
+
+def wait_for_custom_domain(domain_name: str, *, timeout_seconds: int = 600, poll_seconds: int = 10) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    url = f"https://{domain_name}"
+    while time.monotonic() < deadline:
+        try:
+            socket.getaddrinfo(domain_name, 443, type=socket.SOCK_STREAM)
+        except socket.gaierror:
+            time.sleep(poll_seconds)
+            continue
+        if site_url_is_live(url):
+            return True
+        time.sleep(poll_seconds)
+    return False
 
 
 class BuildProgressTracker:
@@ -289,7 +323,7 @@ def run_logged_command(
         recent_lines.append(line.rstrip())
         if on_line:
             on_line(line)
-        if base_url and job_id and heartbeat_message and time.monotonic() - last_heartbeat >= 15:
+        if base_url and job_id and time.monotonic() - last_heartbeat >= 15:
             heartbeat(base_url, job_id, heartbeat_message)
             last_heartbeat = time.monotonic()
 
@@ -448,7 +482,7 @@ def run_scene_wiki_build(job: dict, workdir: Path, custom_domain: str, log_path:
         log_path=log_path,
         base_url=base_url,
         job_id=job["id"],
-        heartbeat_message="Scene wiki build still running.",
+        heartbeat_message="",
         on_line=tracker.handle_line,
     )
     return output_dir
@@ -469,23 +503,30 @@ def handle_job(base_url: str, job: dict, workdir: Path) -> None:
         log_event(base_url, job["id"], "Building static wiki output.", payload={"project_name": project_name})
         output_dir = run_scene_wiki_build(job, workdir, custom_domain, log_path, base_url)
 
-        heartbeat(base_url, job["id"], "Ensuring Cloudflare Pages project exists.")
-        log_event(base_url, job["id"], "Ensuring Cloudflare Pages project exists.", payload={"stage": "pages-project", "overallProgressPct": 97})
+        heartbeat(base_url, job["id"], "")
+        log_event(base_url, job["id"], "Preparing site host.", payload={"stage": "pages-project", "overallProgressPct": 97})
         ensure_pages_project(project_name, workdir, log_path)
 
         for secret_name in ("GOOGLE_API_KEY", "GEMINI_API_KEY"):
           secret_value = os.getenv(secret_name, "").strip()
           if secret_value:
-              log_event(base_url, job["id"], f"Syncing Pages secret {secret_name}.")
               set_pages_secret(project_name, secret_name, secret_value, workdir, log_path)
 
-        heartbeat(base_url, job["id"], "Deploying site bundle to Cloudflare Pages.")
-        log_event(base_url, job["id"], "Deploying site bundle to Cloudflare Pages.", payload={"stage": "deploy", "overallProgressPct": 98})
+        heartbeat(base_url, job["id"], "")
+        log_event(base_url, job["id"], "Publishing site.", payload={"stage": "deploy", "overallProgressPct": 98})
         deploy_pages(project_name, output_dir, workdir, log_path)
 
-        heartbeat(base_url, job["id"], "Attaching custom domain.")
-        log_event(base_url, job["id"], "Attaching custom domain.", payload={"stage": "domain", "overallProgressPct": 99})
+        heartbeat(base_url, job["id"], "")
+        log_event(base_url, job["id"], "Activating subdomain.", payload={"stage": "domain", "overallProgressPct": 99})
         add_custom_domain(project_name, custom_domain)
+        if not wait_for_custom_domain(custom_domain):
+            raise RuntimeError(f"Subdomain did not become reachable in time: https://{custom_domain}")
+        log_event(
+            base_url,
+            job["id"],
+            "Subdomain is live.",
+            payload={"stage": "domain", "overallProgressPct": 100, "customDomain": custom_domain},
+        )
 
         api_request(
             base_url,

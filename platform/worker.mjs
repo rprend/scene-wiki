@@ -613,7 +613,7 @@ async function handleCompleteJob(request, env, jobId) {
        WHERE slug = ?`,
     ).bind(title, pagesProjectName, pagesUrl, customDomain, jobId, timestamp, siteSlug.site_slug),
   ])
-  await appendEvent(env, jobId, "info", "Job completed and site marked deployed.", {
+  await appendEvent(env, jobId, "info", "Scene wiki is live.", {
     pagesProjectName,
     pagesUrl,
     customDomain,

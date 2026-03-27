@@ -53,13 +53,28 @@ function formatDuration(seconds) {
 }
 
 function summarizeEvents(events) {
-  const latestWithProgress = [...events].reverse().find((event) => event.payload?.overallProgressPct != null)
-  const visibleEvents = events.filter((event, index) => {
-    if (event.message !== "Scene wiki build still running.") {
-      return true
+  const hiddenMessagePatterns = [
+    /^Runner log initialized\.$/,
+    /^Runner failed\.$/,
+    /^Syncing Pages secret /,
+    /^Ensuring Cloudflare Pages project exists\.$/,
+    /^Deploying site bundle to Cloudflare Pages\.$/,
+    /^Attaching custom domain\.$/,
+    /^Job completed and site marked deployed\.$/,
+    /^Scene wiki build still running\.$/,
+  ]
+  const filteredEvents = events.filter((event) => !hiddenMessagePatterns.some((pattern) => pattern.test(event.message)))
+  const dedupedEvents = []
+  for (const event of filteredEvents) {
+    const previous = dedupedEvents[dedupedEvents.length - 1]
+    if (previous && previous.message === event.message) {
+      dedupedEvents[dedupedEvents.length - 1] = event
+      continue
     }
-    return index === events.length - 1
-  }).slice(-8)
+    dedupedEvents.push(event)
+  }
+  const latestWithProgress = [...dedupedEvents].reverse().find((event) => event.payload?.overallProgressPct != null)
+  const visibleEvents = dedupedEvents.slice(-8)
   return { latestWithProgress, visibleEvents }
 }
 
