@@ -7,7 +7,7 @@ kill_timeout = "5m"
   dockerfile = "Dockerfile.runner"
 
 [env]
-  PLATFORM_BASE_URL = "https://scene-wiki-platform.founders-0e1.workers.dev"
+  PLATFORM_BASE_URL = "https://scenewiki.net"
   MAIN_DOMAIN = "scenewiki.net"
   PAGES_PROJECT_PREFIX = "scene-wiki"
   RUNNER_POLL_SECONDS = "20"
