@@ -1,0 +1,2 @@
+[console_scripts]
+scene-wiki = scene_wiki.cli:app

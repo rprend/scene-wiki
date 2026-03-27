@@ -1,0 +1,13 @@
+.DS_Store
+.env
+.dev.vars
+.scene-wiki.env
+.venv/
+node_modules/
+.cache/
+data/
+dist/
+vault/
+wiki/content/
+wiki/public/
+*.log
