@@ -122,15 +122,155 @@ body[data-slug="index"] .status-panel.hidden {
 
 body[data-slug="index"] .status-panel {
   margin-top: 1rem;
-  padding: 0.9rem 1rem;
+  padding: 0;
+  overflow: hidden;
 }
 
-body[data-slug="index"] .status-panel p {
-  margin: 0.3rem 0;
+body[data-slug="index"] .status-shell {
+  display: flex;
+  flex-direction: column;
+}
+
+body[data-slug="index"] .status-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  padding: 0.95rem 1rem;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+body[data-slug="index"] .status-summary::-webkit-details-marker {
+  display: none;
+}
+
+body[data-slug="index"] .status-summary::marker {
+  content: "";
+}
+
+body[data-slug="index"] .status-summary:hover {
+  background: rgba(15, 23, 42, 0.03);
+}
+
+body[data-slug="index"] .status-summary-main {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+body[data-slug="index"] .status-summary-copy {
+  min-width: 0;
+}
+
+body[data-slug="index"] .status-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+body[data-slug="index"] .status-title {
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--dark);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+body[data-slug="index"] .status-subtitle,
+body[data-slug="index"] .status-meta-inline,
+body[data-slug="index"] .status-event-line,
+body[data-slug="index"] .status-empty {
+  color: var(--gray);
+  font-size: 0.92rem;
+}
+
+body[data-slug="index"] .status-subtitle {
+  margin-top: 0.18rem;
+}
+
+body[data-slug="index"] .status-summary-side {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-shrink: 0;
+}
+
+body[data-slug="index"] .status-stage-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 1.9rem;
+  padding: 0 0.7rem;
+  border: 1px solid var(--lightgray);
+  border-radius: 999px;
+  background: var(--light);
+  color: var(--darkgray);
+  font-size: 0.86rem;
+}
+
+body[data-slug="index"] .status-spinner {
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 999px;
+  border: 2px solid rgba(38, 78, 219, 0.18);
+  border-top-color: var(--secondary);
+  animation: scene-wiki-spin 0.9s linear infinite;
+}
+
+body[data-slug="index"] .status-spinner.status-done,
+body[data-slug="index"] .status-spinner.status-failed {
+  animation: none;
+  border-color: transparent;
+  width: auto;
+  height: auto;
+  font-size: 0.9rem;
+}
+
+body[data-slug="index"] .status-spinner.status-done::before {
+  content: "✓";
+  color: #15803d;
+}
+
+body[data-slug="index"] .status-spinner.status-failed::before {
+  content: "!";
+  color: #b91c1c;
+}
+
+body[data-slug="index"] .status-caret {
+  color: var(--gray);
+  font-size: 0.85rem;
+  transition: transform 120ms ease;
+}
+
+body[data-slug="index"] .status-shell[open] .status-caret {
+  transform: rotate(180deg);
+}
+
+body[data-slug="index"] .status-details {
+  padding: 0 1rem 1rem;
+  border-top: 1px solid var(--lightgray);
+}
+
+body[data-slug="index"] .status-details p {
+  margin: 0;
+}
+
+body[data-slug="index"] .status-error {
+  margin-bottom: 0.75rem;
+  color: #b91c1c;
+  font-size: 0.92rem;
 }
 
 body[data-slug="index"] .progress-shell {
-  margin: 0.8rem 0 0.9rem;
+  margin: 0.8rem 0;
 }
 
 body[data-slug="index"] .progress-meta {
@@ -155,25 +295,75 @@ body[data-slug="index"] .progress-bar span {
 }
 
 body[data-slug="index"] .status-events {
-  margin-top: 0.9rem;
-  padding-top: 0.8rem;
-  border-top: 1px solid var(--lightgray);
+  margin-top: 0.8rem;
 }
 
 body[data-slug="index"] .status-events ol {
+  list-style: none;
   margin: 0;
-  padding-left: 1.1rem;
+  padding: 0;
 }
 
 body[data-slug="index"] .status-events li {
-  margin: 0.45rem 0;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 2rem;
+  margin: 0.28rem 0;
+  padding: 0.35rem 0.55rem;
+  border-radius: 7px;
+  background: rgba(15, 23, 42, 0.025);
+}
+
+body[data-slug="index"] .status-event-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  min-width: 0;
+}
+
+body[data-slug="index"] .status-event-row.in-progress {
+  background: linear-gradient(110deg, rgba(38, 78, 219, 0.04) 8%, rgba(38, 78, 219, 0.13) 18%, rgba(38, 78, 219, 0.04) 33%);
+  background-size: 200% 100%;
+  animation: scene-wiki-shimmer 1.5s linear infinite;
+  border-radius: 6px;
+}
+
+body[data-slug="index"] .status-event-copy {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.93rem;
+  color: var(--dark);
 }
 
 body[data-slug="index"] .status-event-meta {
-  display: block;
+  flex-shrink: 0;
   color: var(--gray);
-  font-size: 0.9rem;
-  margin-top: 0.1rem;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+body[data-slug="index"] .status-event-dot {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 999px;
+  background: var(--lightgray);
+  flex-shrink: 0;
+}
+
+body[data-slug="index"] .status-event-dot.in-progress {
+  background: var(--secondary);
+  box-shadow: 0 0 0 0 rgba(38, 78, 219, 0.35);
+  animation: scene-wiki-pulse 1.4s ease-out infinite;
+}
+
+body[data-slug="index"] .status-open-link {
+  display: inline-block;
+  margin-top: 0.85rem;
 }
 
 body[data-slug="index"] .site-list {
@@ -232,5 +422,54 @@ body[data-slug="index"] .rail-copy {
   body[data-slug="index"] .submit-row,
   body[data-slug="index"] .site-foot {
     flex-direction: column;
+  }
+
+  body[data-slug="index"] .status-summary,
+  body[data-slug="index"] .status-event-row {
+    align-items: flex-start;
+  }
+
+  body[data-slug="index"] .status-summary {
+    flex-direction: column;
+  }
+
+  body[data-slug="index"] .status-summary-side {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  body[data-slug="index"] .status-event-row {
+    flex-direction: column;
+    gap: 0.18rem;
+  }
+
+  body[data-slug="index"] .status-event-copy,
+  body[data-slug="index"] .status-event-meta,
+  body[data-slug="index"] .status-title {
+    white-space: normal;
+  }
+}
+
+@keyframes scene-wiki-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes scene-wiki-shimmer {
+  to {
+    background-position-x: -200%;
+  }
+}
+
+@keyframes scene-wiki-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(38, 78, 219, 0.35);
+  }
+  70% {
+    box-shadow: 0 0 0 7px rgba(38, 78, 219, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(38, 78, 219, 0);
   }
 }

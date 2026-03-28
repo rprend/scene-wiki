@@ -348,6 +348,7 @@ function mapJobRecord(row) {
   if (!row) return null
   return {
     id: row.id,
+    title: row.title,
     siteSlug: row.site_slug,
     sourceUrl: row.source_url,
     sourceType: row.source_type,
@@ -420,10 +421,12 @@ async function handleGetSite(env, slug) {
 
 async function handleGetJob(env, jobId) {
   const job = await env.SCENE_WIKI_DB.prepare(
-    `SELECT id, site_slug, source_url, source_type, status, queue_time, started_at, heartbeat_at,
-            finished_at, updated_at, error_message, run_dir, pages_project_name, pages_url, custom_domain
-     FROM jobs
-     WHERE id = ?`,
+    `SELECT j.id, j.site_slug, j.source_url, j.source_type, j.status, j.queue_time, j.started_at, j.heartbeat_at,
+            j.finished_at, j.updated_at, j.error_message, j.run_dir, j.pages_project_name, j.pages_url, j.custom_domain,
+            s.title
+     FROM jobs j
+     JOIN sites s ON s.slug = j.site_slug
+     WHERE j.id = ?`,
   )
     .bind(jobId)
     .first()
@@ -562,10 +565,12 @@ async function handleCreateJob(request, env) {
   await incrementRateBucket(env, rateBucket.key, rateBucket.count + 1)
 
   const job = await env.SCENE_WIKI_DB.prepare(
-    `SELECT id, site_slug, source_url, source_type, status, queue_time, started_at, heartbeat_at,
-            finished_at, updated_at, error_message, run_dir, pages_project_name, pages_url, custom_domain
-     FROM jobs
-     WHERE id = ?`,
+    `SELECT j.id, j.site_slug, j.source_url, j.source_type, j.status, j.queue_time, j.started_at, j.heartbeat_at,
+            j.finished_at, j.updated_at, j.error_message, j.run_dir, j.pages_project_name, j.pages_url, j.custom_domain,
+            s.title
+     FROM jobs j
+     JOIN sites s ON s.slug = j.site_slug
+     WHERE j.id = ?`,
   )
     .bind(id)
     .first()

@@ -52,6 +52,23 @@ function formatDuration(seconds) {
   return `${secs}s`
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;")
+}
+
+function titleFromSlug(slug) {
+  return String(slug || "Scene Wiki")
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ")
+}
+
 function summarizeEvents(events) {
   const hiddenMessagePatterns = [
     /^Runner log initialized\.$/,
@@ -82,8 +99,29 @@ function summarizeEvents(events) {
     if (progress < bestProgress) return best
     return new Date(event.createdAt) >= new Date(best.createdAt) ? event : best
   }, null)
+  const newestEvent = dedupedEvents[dedupedEvents.length - 1] || null
   const visibleEvents = dedupedEvents.slice(-8)
-  return { latestWithProgress, visibleEvents }
+  return { latestWithProgress, newestEvent, visibleEvents }
+}
+
+function summarizeEventLine(event) {
+  const parts = [event.message]
+  if (event.payload?.analysisProgressPct != null) {
+    parts.push(`${event.payload.analysisProgressPct}%`)
+  }
+  if (event.payload?.totalChunks != null && event.payload?.completedChunks != null) {
+    parts.push(`${event.payload.completedChunks}/${event.payload.totalChunks} chunks`)
+  }
+  if (event.payload?.postsSaved != null) {
+    parts.push(`${event.payload.postsSaved} posts`)
+  }
+  if (event.payload?.totalTextCharacters != null) {
+    parts.push(`${event.payload.totalTextCharacters.toLocaleString()} chars`)
+  }
+  if (event.payload?.etaLabel) {
+    parts.push(`ETA ${event.payload.etaLabel}`)
+  }
+  return parts.join(" · ")
 }
 
 function renderStatus(job, events = []) {
@@ -94,11 +132,12 @@ function renderStatus(job, events = []) {
     : job.pagesUrl
       ? job.pagesUrl
       : null
-  const { latestWithProgress, visibleEvents } = summarizeEvents(events)
-  const lines = [
-    `<p><strong>${job.statusLabel}</strong> for <code>${job.siteSlug}</code></p>`,
-    `<p class="status-meta">Job ${job.id} · queued ${formatDate(job.queueTime)} · updated ${formatDate(job.updatedAt)}</p>`,
-  ]
+  const { latestWithProgress, newestEvent, visibleEvents } = summarizeEvents(events)
+  const title = job.title || titleFromSlug(job.siteSlug)
+  const headline = newestEvent ? summarizeEventLine(newestEvent) : `${job.statusLabel} · ${job.siteSlug}`
+  const isTerminal = ["deployed", "failed"].includes(job.status)
+  const spinnerClass = job.status === "deployed" ? "status-done" : job.status === "failed" ? "status-failed" : ""
+  const lines = []
 
   if (latestWithProgress?.payload?.overallProgressPct != null) {
     const etaLabel = latestWithProgress.payload.etaLabel || formatDuration(latestWithProgress.payload.etaSeconds)
@@ -106,7 +145,7 @@ function renderStatus(job, events = []) {
     lines.push(`
       <div class="progress-shell">
         <div class="progress-meta">
-          <span>${latestWithProgress.message}</span>
+          <span>${escapeHtml(latestWithProgress.message)}</span>
           <span>${latestWithProgress.payload.overallProgressPct}%</span>
         </div>
         <div class="progress-bar"><span style="width: ${latestWithProgress.payload.overallProgressPct}%"></span></div>
@@ -116,40 +155,56 @@ function renderStatus(job, events = []) {
   }
 
   if (job.errorMessage) {
-    lines.push(`<p>${job.errorMessage}</p>`)
+    lines.push(`<p class="status-error">${escapeHtml(job.errorMessage)}</p>`)
   }
 
   if (visibleEvents.length) {
     const items = visibleEvents
-      .map((event) => {
-        const detailParts = []
-        if (event.payload?.analysisProgressPct != null) {
-          detailParts.push(`${event.payload.analysisProgressPct}% analysis`)
-        }
-        if (event.payload?.totalChunks != null && event.payload?.completedChunks != null) {
-          detailParts.push(`${event.payload.completedChunks}/${event.payload.totalChunks} chunks`)
-        }
-        if (event.payload?.postsSaved != null) {
-          detailParts.push(`${event.payload.postsSaved} posts`)
-        }
-        if (event.payload?.totalTextCharacters != null) {
-          detailParts.push(`${event.payload.totalTextCharacters.toLocaleString()} chars`)
-        }
-        if (event.payload?.etaLabel) {
-          detailParts.push(`ETA ${event.payload.etaLabel}`)
-        }
-        const detail = detailParts.length ? ` · ${detailParts.join(" · ")}` : ""
-        return `<li><strong>${event.message}</strong><span class="status-event-meta">${detail} · ${formatDate(event.createdAt)}</span></li>`
+      .map((event, index) => {
+        const isCurrent = !isTerminal && index === visibleEvents.length - 1
+        return `
+          <li>
+            <span class="status-event-dot${isCurrent ? " in-progress" : ""}"></span>
+            <div class="status-event-row${isCurrent ? " in-progress" : ""}">
+              <span class="status-event-copy">${escapeHtml(summarizeEventLine(event))}</span>
+              <span class="status-event-meta">${escapeHtml(formatDate(event.createdAt))}</span>
+            </div>
+          </li>
+        `
       })
       .join("")
     lines.push(`<div class="status-events"><ol>${items}</ol></div>`)
+  } else {
+    lines.push(`<p class="status-empty">No tool events yet.</p>`)
   }
 
   if (siteLink) {
-    lines.push(`<p><a href="${siteLink}" target="_blank" rel="noreferrer">Open site</a></p>`)
+    lines.push(`<a class="status-open-link" href="${siteLink}" target="_blank" rel="noreferrer">Open site</a>`)
   }
 
-  statusBody.innerHTML = lines.join("")
+  statusBody.innerHTML = `
+    <details class="status-shell" ${isTerminal ? "" : "open"}>
+      <summary class="status-summary">
+        <div class="status-summary-main">
+          <span class="status-spinner ${spinnerClass}" aria-hidden="true"></span>
+          <div class="status-summary-copy">
+            <div class="status-title-row">
+              <span class="status-title">${escapeHtml(title)}</span>
+            </div>
+            <div class="status-subtitle">${escapeHtml(headline)}</div>
+          </div>
+        </div>
+        <div class="status-summary-side">
+          <span class="status-stage-pill">${escapeHtml(job.statusLabel)}</span>
+          <span class="status-caret" aria-hidden="true">▾</span>
+        </div>
+      </summary>
+      <div class="status-details">
+        <p class="status-meta-inline">Job ${escapeHtml(job.id)} · queued ${escapeHtml(formatDate(job.queueTime))} · updated ${escapeHtml(formatDate(job.updatedAt))}</p>
+        ${lines.join("")}
+      </div>
+    </details>
+  `
 }
 
 function persistActiveJob(jobId) {
