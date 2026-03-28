@@ -124,16 +124,21 @@ body[data-slug="index"] .status-panel {
   margin-top: 1rem;
   padding: 0;
   overflow: hidden;
+  border: 1px solid #e4e1d8;
+  border-radius: 12px;
+  background: #fffdfa;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.02);
 }
 
 body[data-slug="index"] .status-shell {
   display: flex;
   flex-direction: column;
+  background: transparent;
 }
 
 body[data-slug="index"] .status-summary {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
   width: 100%;
@@ -154,13 +159,13 @@ body[data-slug="index"] .status-summary::marker {
 }
 
 body[data-slug="index"] .status-summary:hover {
-  background: rgba(15, 23, 42, 0.03);
+  background: rgba(15, 23, 42, 0.02);
 }
 
 body[data-slug="index"] .status-summary-main {
   display: flex;
-  align-items: center;
-  gap: 0.75rem;
+  align-items: flex-start;
+  gap: 0.8rem;
   min-width: 0;
 }
 
@@ -176,7 +181,7 @@ body[data-slug="index"] .status-title-row {
 }
 
 body[data-slug="index"] .status-title {
-  font-weight: 700;
+  font-weight: 600;
   font-size: 1rem;
   color: var(--dark);
   white-space: nowrap;
@@ -189,40 +194,44 @@ body[data-slug="index"] .status-meta-inline,
 body[data-slug="index"] .status-event-line,
 body[data-slug="index"] .status-empty {
   color: var(--gray);
-  font-size: 0.92rem;
+  font-size: 0.9rem;
 }
 
 body[data-slug="index"] .status-subtitle {
-  margin-top: 0.18rem;
+  margin-top: 0.16rem;
+  font-family: "Schibsted Grotesk", sans-serif;
+  color: #9b9b97;
 }
 
 body[data-slug="index"] .status-summary-side {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: 0.5rem;
   flex-shrink: 0;
 }
 
 body[data-slug="index"] .status-stage-pill {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  min-height: 1.9rem;
-  padding: 0 0.7rem;
-  border: 1px solid var(--lightgray);
+  min-height: auto;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid #ddd9ce;
   border-radius: 999px;
-  background: var(--light);
-  color: var(--darkgray);
-  font-size: 0.86rem;
+  background: #fcfbf8;
+  color: #4f4f4b;
+  font-family: "Schibsted Grotesk", sans-serif;
+  font-size: 0.8rem;
+  font-weight: 500;
 }
 
 body[data-slug="index"] .status-spinner {
-  width: 0.8rem;
-  height: 0.8rem;
+  width: 0.9rem;
+  height: 0.9rem;
   border-radius: 999px;
-  border: 2px solid rgba(38, 78, 219, 0.18);
-  border-top-color: var(--secondary);
-  animation: scene-wiki-spin 0.9s linear infinite;
+  border: 2px solid rgba(96, 129, 233, 0.18);
+  border-top-color: #5a7ae6;
+  animation: scene-wiki-spin 0.8s linear infinite;
+  margin-top: 0.2rem;
 }
 
 body[data-slug="index"] .status-spinner.status-done,
@@ -246,8 +255,9 @@ body[data-slug="index"] .status-spinner.status-failed::before {
 
 body[data-slug="index"] .status-caret {
   color: var(--gray);
-  font-size: 0.85rem;
+  font-size: 0.75rem;
   transition: transform 120ms ease;
+  margin-top: 0.18rem;
 }
 
 body[data-slug="index"] .status-shell[open] .status-caret {
@@ -255,8 +265,9 @@ body[data-slug="index"] .status-shell[open] .status-caret {
 }
 
 body[data-slug="index"] .status-details {
-  padding: 0 1rem 1rem;
-  border-top: 1px solid var(--lightgray);
+  padding: 0.75rem 1rem 0.95rem;
+  border-top: 1px solid #ece8de;
+  background: #fffdfa;
 }
 
 body[data-slug="index"] .status-details p {
@@ -270,32 +281,33 @@ body[data-slug="index"] .status-error {
 }
 
 body[data-slug="index"] .progress-shell {
-  margin: 0.8rem 0;
+  margin: 0.65rem 0 0.8rem;
 }
 
 body[data-slug="index"] .progress-meta {
   display: flex;
   justify-content: space-between;
   gap: 1rem;
-  font-size: 0.95rem;
-  margin-bottom: 0.35rem;
+  font-size: 0.86rem;
+  margin-bottom: 0.24rem;
+  font-family: "Schibsted Grotesk", sans-serif;
 }
 
 body[data-slug="index"] .progress-bar {
-  height: 8px;
+  height: 6px;
   border-radius: 999px;
-  background: var(--lightgray);
+  background: #efede7;
   overflow: hidden;
 }
 
 body[data-slug="index"] .progress-bar span {
   display: block;
   height: 100%;
-  background: var(--secondary);
+  background: linear-gradient(90deg, #6f86d8, #4a67c6);
 }
 
 body[data-slug="index"] .status-events {
-  margin-top: 0.8rem;
+  margin-top: 0.6rem;
 }
 
 body[data-slug="index"] .status-events ol {
@@ -307,12 +319,13 @@ body[data-slug="index"] .status-events ol {
 body[data-slug="index"] .status-events li {
   display: flex;
   align-items: center;
-  gap: 0.55rem;
-  min-height: 2rem;
-  margin: 0.28rem 0;
-  padding: 0.35rem 0.55rem;
-  border-radius: 7px;
-  background: rgba(15, 23, 42, 0.025);
+  gap: 0.45rem;
+  min-height: 2.1rem;
+  margin: 0.22rem 0;
+  padding: 0.28rem 0.6rem;
+  border-radius: 10px;
+  background: #f7f8fb;
+  border: 0;
 }
 
 body[data-slug="index"] .status-event-row {
@@ -325,10 +338,10 @@ body[data-slug="index"] .status-event-row {
 }
 
 body[data-slug="index"] .status-event-row.in-progress {
-  background: linear-gradient(110deg, rgba(38, 78, 219, 0.04) 8%, rgba(38, 78, 219, 0.13) 18%, rgba(38, 78, 219, 0.04) 33%);
+  background: linear-gradient(110deg, rgba(103, 128, 214, 0.03) 8%, rgba(103, 128, 214, 0.11) 18%, rgba(103, 128, 214, 0.03) 33%);
   background-size: 200% 100%;
   animation: scene-wiki-shimmer 1.5s linear infinite;
-  border-radius: 6px;
+  border-radius: 8px;
 }
 
 body[data-slug="index"] .status-event-copy {
@@ -336,34 +349,38 @@ body[data-slug="index"] .status-event-copy {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.93rem;
+  font-size: 0.9rem;
   color: var(--dark);
+  font-family: "Schibsted Grotesk", sans-serif;
 }
 
 body[data-slug="index"] .status-event-meta {
   flex-shrink: 0;
-  color: var(--gray);
-  font-size: 0.82rem;
+  color: #a4a39d;
+  font-size: 0.78rem;
   white-space: nowrap;
+  font-family: "Schibsted Grotesk", sans-serif;
 }
 
 body[data-slug="index"] .status-event-dot {
-  width: 0.42rem;
-  height: 0.42rem;
+  width: 0.5rem;
+  height: 0.5rem;
   border-radius: 999px;
-  background: var(--lightgray);
+  background: #cbd5f2;
   flex-shrink: 0;
 }
 
 body[data-slug="index"] .status-event-dot.in-progress {
-  background: var(--secondary);
-  box-shadow: 0 0 0 0 rgba(38, 78, 219, 0.35);
+  background: #5a7ae6;
+  box-shadow: 0 0 0 0 rgba(74, 103, 198, 0.28);
   animation: scene-wiki-pulse 1.4s ease-out infinite;
 }
 
 body[data-slug="index"] .status-open-link {
   display: inline-block;
-  margin-top: 0.85rem;
+  margin-top: 0.55rem;
+  font-size: 0.86rem;
+  font-family: "Schibsted Grotesk", sans-serif;
 }
 
 body[data-slug="index"] .site-list {
