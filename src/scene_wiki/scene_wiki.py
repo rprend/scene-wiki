@@ -567,6 +567,55 @@ def _raw_text_lines(text: str, words_per_paragraph: int = 100) -> list[str]:
     return paragraphs
 
 
+def _build_issue_note_body(
+    doc_id: str,
+    doc: dict[str, Any],
+    entity_ids: list[int],
+    *,
+    entities: list[dict[str, Any]],
+    category_paths: dict[str, str],
+    entity_note_paths: dict[int, str],
+) -> list[str]:
+    title = doc.get("title", doc_id)
+    published_at = doc.get("published_at")
+    grouped: dict[str, list[int]] = defaultdict(list)
+    for entity_id in entity_ids:
+        grouped[entities[entity_id]["category"]].append(entity_id)
+
+    body = [
+        f"# {title}",
+        "",
+        _abstract(doc.get("text", "")),
+        "",
+        "## Metadata",
+        "",
+    ]
+    if published_at:
+        body.append(f"- Published: {_human_date(published_at)}")
+    if doc.get("url"):
+        body.append(f"- Source: [{doc['url']}]({doc['url']})")
+    body.append(f"- Document ID: `{doc_id}`")
+    body.append("")
+    body.append("## Category Map")
+    body.append("")
+    for category in sorted(grouped.keys()):
+        cat_title = _display_category_title(category)
+        body.append(f"### {cat_title}")
+        body.append("")
+        for entity_id in grouped[category]:
+            entity = entities[entity_id]
+            body.append(
+                f"- {_wikilink(entity_note_paths[entity_id], entity['name'])} ({entity.get('mention_count', 0)} mentions)"
+            )
+        body.append("")
+    body += [
+        "## Full Primary Source Text",
+        "",
+        *_raw_text_lines(doc.get("text", "")),
+    ]
+    return body
+
+
 def _entity_blurb(
     entity: dict[str, Any],
     docs: dict[str, dict[str, Any]],
@@ -781,6 +830,7 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
                 related_counts[target_id][source_id] += 1
 
     notes: dict[str, Note] = {}
+    issue_note_specs: dict[str, tuple[str, dict[str, Any], list[int]]] = {}
 
     category_paths = {category: f"categories/{category}" for category in effective_categories}
     index_paths = {
@@ -858,42 +908,8 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
         published_at = doc.get("published_at")
         entity_ids = doc_entities.get(doc_id, [])
         links_to = {category_paths[entities[idx]["category"]] for idx in entity_ids if entities[idx]["category"] in category_paths}
-        grouped: dict[str, list[int]] = defaultdict(list)
         for entity_id in entity_ids:
-            grouped[entities[entity_id]["category"]].append(entity_id)
             links_to.add(entity_note_paths[entity_id])
-
-        body = [
-            f"# {title}",
-            "",
-            _abstract(doc.get("text", "")),
-            "",
-            "## Metadata",
-            "",
-        ]
-        if published_at:
-            body.append(f"- Published: {_human_date(published_at)}")
-        if doc.get("url"):
-            body.append(f"- Source: [{doc['url']}]({doc['url']})")
-        body.append(f"- Document ID: `{doc_id}`")
-        body.append("")
-        body.append("## Category Map")
-        body.append("")
-        for category in sorted(grouped.keys()):
-            cat_title = _display_category_title(category)
-            body.append(f"### {cat_title}")
-            body.append("")
-            for entity_id in grouped[category]:
-                entity = entities[entity_id]
-                body.append(
-                    f"- {_wikilink(entity_note_paths[entity_id], entity['name'])} ({entity.get('mention_count', 0)} mentions)"
-                )
-            body.append("")
-        body += [
-            "## Full Primary Source Text",
-            "",
-            *_raw_text_lines(doc.get("text", "")),
-        ]
 
         notes[issue_path] = Note(
             path=issue_path,
@@ -909,9 +925,10 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
                 "aliases": [doc_id],
                 "description": _description(_abstract(doc.get("text", ""))),
             },
-            body=body,
+            body=[],
             links_to=links_to,
         )
+        issue_note_specs[issue_path] = (doc_id, doc, entity_ids)
 
     entities_by_category: dict[str, list[int]] = defaultdict(list)
     for idx, entity in enumerate(entities):
@@ -1258,7 +1275,18 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
     for note in notes.values():
         note_path = vault_dir / f"{note.path}.md"
         note_path.parent.mkdir(parents=True, exist_ok=True)
-        full_body = list(note.body)
+        if note.path in issue_note_specs:
+            doc_id, doc, entity_ids = issue_note_specs[note.path]
+            full_body = _build_issue_note_body(
+                doc_id,
+                doc,
+                entity_ids,
+                entities=entities,
+                category_paths=category_paths,
+                entity_note_paths=entity_note_paths,
+            )
+        else:
+            full_body = list(note.body)
         full_body.extend(["", *_render_backlinks(note.path, backlinks, notes)])
         note_path.write_text(
             _frontmatter(note.frontmatter) + "\n\n" + "\n".join(full_body).rstrip() + "\n",
