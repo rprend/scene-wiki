@@ -73,7 +73,15 @@ function summarizeEvents(events) {
     }
     dedupedEvents.push(event)
   }
-  const latestWithProgress = [...dedupedEvents].reverse().find((event) => event.payload?.overallProgressPct != null)
+  const latestWithProgress = dedupedEvents.reduce((best, event) => {
+    const progress = event.payload?.overallProgressPct
+    if (progress == null) return best
+    if (!best) return event
+    const bestProgress = best.payload?.overallProgressPct ?? -1
+    if (progress > bestProgress) return event
+    if (progress < bestProgress) return best
+    return new Date(event.createdAt) >= new Date(best.createdAt) ? event : best
+  }, null)
   const visibleEvents = dedupedEvents.slice(-8)
   return { latestWithProgress, visibleEvents }
 }
