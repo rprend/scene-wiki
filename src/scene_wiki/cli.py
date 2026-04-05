@@ -36,6 +36,10 @@ def scrape_substack_command(
         f"Saved {result['posts_saved']} posts from {result['archive_posts_selected']} selected archive entries "
         f"({result['total_text_characters']} chars) into {result['run_dir']}"
     )
+    typer.echo(
+        f"Estimated extraction: {result['estimated_total_chunks']} chunks / "
+        f"{result['estimated_input_tokens']} input tokens"
+    )
     typer.echo(result["run_dir"])
 
 
@@ -108,6 +112,10 @@ def build_substack_command(
     typer.echo(
         f"Saved {scrape_result['posts_saved']} posts from {scrape_result['archive_posts_selected']} selected archive entries "
         f"({scrape_result['total_text_characters']} chars) into {actual_run_dir}"
+    )
+    typer.echo(
+        f"Estimated extraction: {scrape_result['estimated_total_chunks']} chunks / "
+        f"{scrape_result['estimated_input_tokens']} input tokens"
     )
     typer.echo(f"Building newsletter corpus in {actual_run_dir}")
     build_newsletter_corpus(run_dir=actual_run_dir, model=model, workers=workers)

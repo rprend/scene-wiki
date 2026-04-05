@@ -81,6 +81,8 @@ Relevant keys:
 - `MAIN_DOMAIN`
 - `PLATFORM_BASE_URL`
 - `SCENE_WIKI_MAX_ARTICLES`
+- `SCENE_WIKI_MAX_ESTIMATED_INPUT_TOKENS`
+- `SCENE_WIKI_COST_SAMPLE_POSTS`
 
 If `SUBSTACK_COOKIE` is set, the scraper will send it with requests so paid or subscriber-only posts can resolve when your session has access.
 

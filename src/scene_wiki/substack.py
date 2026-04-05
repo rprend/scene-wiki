@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import time
@@ -14,6 +15,7 @@ from urllib.parse import urlparse
 import httpx
 
 from .models import NormalizedDocument
+from .newsletter_extraction import NEWSLETTER_EXTRACTION_PROMPT
 from .storage import make_run, save_normalized_documents, write_json, write_text
 
 
@@ -21,6 +23,7 @@ ARCHIVE_PAGE_SIZE = 12
 DEFAULT_TIMEOUT = 30.0
 MAX_RETRIES = 6
 USER_AGENT = "Mozilla/5.0 (compatible; scene-wiki/0.1; +https://example.invalid)"
+DEFAULT_COST_SAMPLE_POSTS = 12
 
 
 class BodyTextExtractor(HTMLParser):
@@ -232,6 +235,73 @@ def fetch_post_text(client: httpx.Client, url: str) -> ExtractedPost:
     )
 
 
+def _estimated_chunk_count(text_length: int, *, chunk_size: int = 2200, overlap: int = 250) -> int:
+    if text_length <= 0:
+        return 0
+    if text_length <= chunk_size:
+        return 1
+    step = max(chunk_size - overlap, 1)
+    return 1 + math.ceil((text_length - chunk_size) / step)
+
+
+def _estimate_input_tokens(total_chunks: int, *, avg_chunk_chars: float, subject_name: str) -> int:
+    prompt_without_text = NEWSLETTER_EXTRACTION_PROMPT.replace("SUBJECT_PLACEHOLDER", subject_name).replace(
+        "TEXT_PLACEHOLDER",
+        "",
+    )
+    avg_prompt_chars = len(prompt_without_text) + avg_chunk_chars
+    return math.ceil((avg_prompt_chars * total_chunks) / 4)
+
+
+def _select_sample_posts(posts: list[dict[str, Any]], sample_size: int) -> list[dict[str, Any]]:
+    if sample_size <= 0 or len(posts) <= sample_size:
+        return posts
+    indices = {round(index * (len(posts) - 1) / (sample_size - 1)) for index in range(sample_size)}
+    return [posts[index] for index in sorted(indices)]
+
+
+def estimate_archive_cost(
+    client: httpx.Client,
+    posts: list[dict[str, Any]],
+    *,
+    subject_name: str,
+    sample_size: int = DEFAULT_COST_SAMPLE_POSTS,
+) -> tuple[dict[str, Any], dict[int, ExtractedPost]]:
+    sampled_posts = _select_sample_posts(posts, sample_size)
+    sampled_extracted: dict[int, ExtractedPost] = {}
+    sample_lengths: list[int] = []
+    sample_chunk_counts: list[int] = []
+
+    for post in sampled_posts:
+        extracted = fetch_post_text(client, post["canonical_url"])
+        sampled_extracted[post["id"]] = extracted
+        text_length = len(extracted.text)
+        sample_lengths.append(text_length)
+        sample_chunk_counts.append(_estimated_chunk_count(text_length))
+        time.sleep(0.25)
+
+    avg_text_chars = (sum(sample_lengths) / len(sample_lengths)) if sample_lengths else 0.0
+    avg_chunks_per_post = (sum(sample_chunk_counts) / len(sample_chunk_counts)) if sample_chunk_counts else 0.0
+    estimated_total_chunks = math.ceil(avg_chunks_per_post * len(posts))
+    estimated_input_tokens = _estimate_input_tokens(
+        estimated_total_chunks,
+        avg_chunk_chars=min(avg_text_chars, 2200),
+        subject_name=subject_name,
+    )
+
+    return (
+        {
+            "sampledPosts": len(sample_lengths),
+            "averageTextCharacters": round(avg_text_chars),
+            "averageChunksPerPost": round(avg_chunks_per_post, 2),
+            "estimatedTotalChunks": estimated_total_chunks,
+            "estimatedInputTokens": estimated_input_tokens,
+            "largestSampleTextCharacters": max(sample_lengths, default=0),
+        },
+        sampled_extracted,
+    )
+
+
 def infer_subject(archive_url: str, section_slug: str | None = None) -> str:
     host = (urlparse(archive_url).hostname or "substack").split(".")[0].replace("-", " ").strip()
     base = " ".join(part.capitalize() for part in host.split())
@@ -274,9 +344,28 @@ def scrape_substack_archive(
         if max_articles is not None:
             filtered_posts = filtered_posts[:max_articles]
 
+        sample_size = int(os.getenv("SCENE_WIKI_COST_SAMPLE_POSTS", str(DEFAULT_COST_SAMPLE_POSTS)))
+        cost_estimate, sampled_extracted = estimate_archive_cost(
+            client,
+            filtered_posts,
+            subject_name=subject_name,
+            sample_size=sample_size,
+        )
+        max_estimated_input_tokens = int(os.getenv("SCENE_WIKI_MAX_ESTIMATED_INPUT_TOKENS", "0") or "0")
+        if max_estimated_input_tokens and cost_estimate["estimatedInputTokens"] > max_estimated_input_tokens:
+            raise SystemExit(
+                "Estimated extraction cost too high for this archive: "
+                f"{cost_estimate['estimatedInputTokens']:,} input tokens across about "
+                f"{cost_estimate['estimatedTotalChunks']:,} chunks and {len(filtered_posts):,} posts. "
+                f"Cap is {max_estimated_input_tokens:,} input tokens."
+            )
+
         extracted_posts: list[ExtractedPost] = []
         for post in filtered_posts:
-            extracted_posts.append(fetch_post_text(client, post["canonical_url"]))
+            extracted = sampled_extracted.get(post["id"])
+            if extracted is None:
+                extracted = fetch_post_text(client, post["canonical_url"])
+            extracted_posts.append(extracted)
             time.sleep(1.0)
 
     if run_dir is None:
@@ -363,6 +452,12 @@ def scrape_substack_archive(
         "total_text_characters": sum(item["text_length"] for item in manifest),
         "full_posts": sum(1 for item in manifest if item["body_kind"] == "full"),
         "preview_only_posts": sum(1 for item in manifest if item["body_kind"] == "preview"),
+        "estimated_input_tokens": cost_estimate["estimatedInputTokens"],
+        "estimated_total_chunks": cost_estimate["estimatedTotalChunks"],
+        "average_text_characters": cost_estimate["averageTextCharacters"],
+        "average_chunks_per_post": cost_estimate["averageChunksPerPost"],
+        "sampled_posts": cost_estimate["sampledPosts"],
+        "largest_sample_text_characters": cost_estimate["largestSampleTextCharacters"],
     }
     write_json(run_dir / "artifacts" / "summary.json", summary)
 
