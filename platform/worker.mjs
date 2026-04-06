@@ -448,14 +448,14 @@ async function handleGetJobEvents(env, jobId) {
     `SELECT id, level, message, payload_json, created_at
      FROM job_events
      WHERE job_id = ?
-     ORDER BY created_at ASC
+     ORDER BY created_at DESC, id DESC
      LIMIT 500`,
   )
     .bind(jobId)
     .all()
 
   return jsonResponse({
-    events: results.map((row) => ({
+    events: results.reverse().map((row) => ({
       id: row.id,
       level: row.level,
       message: row.message,
