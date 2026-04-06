@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 from typing import Optional
+import shutil
 
 import typer
 
@@ -76,6 +77,51 @@ def build_search_assets_command(run_dir: Path, output_dir: Path) -> None:
 def build_wiki_command(run_dir: Path, site_dir: Path, vault_dir: Optional[Path] = None) -> None:
     result = build_scene_wiki(run_dir=run_dir, site_dir=site_dir, vault_dir=vault_dir)
     typer.echo(result["site_dir"])
+
+
+@app.command("build-run")
+def build_run_command(
+    run_dir: Path,
+    vault_dir: Path,
+    wiki_dir: Path = Path("wiki"),
+    output_dir: Path = Path("dist/wiki"),
+    quartz_concurrency: int = 3,
+    site_title: Optional[str] = None,
+    reset_extraction: bool = False,
+) -> None:
+    if site_title:
+        import os
+
+        os.environ["SCENE_WIKI_TITLE"] = site_title
+        os.environ["QUARTZ_PAGE_TITLE"] = site_title
+
+    run_dir = run_dir.resolve()
+    if reset_extraction:
+        chunks_dir = run_dir / "artifacts" / "extraction-chunks"
+        if chunks_dir.exists():
+            shutil.rmtree(chunks_dir)
+        for artifact in (
+            run_dir / "artifacts" / "extraction-chunks.json",
+            run_dir / "artifacts" / "corpus.json",
+        ):
+            if artifact.exists():
+                artifact.unlink()
+        usage_dir = run_dir / "artifacts" / "openai-usage"
+        if usage_dir.exists():
+            shutil.rmtree(usage_dir)
+
+    typer.echo(f"Building newsletter corpus in {run_dir}")
+    build_newsletter_corpus(run_dir=run_dir)
+    typer.echo(f"Building full site into {output_dir.resolve()}")
+    result = build_full_site(
+        run_dir=run_dir,
+        wiki_dir=wiki_dir.resolve(),
+        output_dir=output_dir.resolve(),
+        vault_dir=vault_dir.resolve(),
+        quartz_concurrency=quartz_concurrency,
+    )
+    typer.echo(f"Site build complete: {result['output_dir']}")
+    typer.echo(result["output_dir"])
 
 
 @app.command("build-substack")

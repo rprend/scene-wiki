@@ -501,22 +501,45 @@ def run_scene_wiki_build(job: dict, workdir: Path, custom_domain: str, log_path:
     title = job.get("title") or job["siteSlug"].replace("-", " ").title()
     output_dir = workdir / "dist" / "generated" / job["siteSlug"]
     vault_dir = workdir / "vault" / job["siteSlug"]
-    command = [
-        "scene-wiki",
-        "build-substack",
-        job["sourceUrl"],
-        "--subject",
-        title,
-        "--site-title",
-        title,
-        "--output-dir",
-        str(output_dir),
-        "--vault-dir",
-        str(vault_dir),
-    ]
-    max_articles = os.getenv("SCENE_WIKI_MAX_ARTICLES", "").strip()
-    if max_articles:
-        command.extend(["--max-articles", max_articles])
+    run_dir_value = (job.get("runDir") or "").strip()
+    if run_dir_value:
+        run_dir = Path(run_dir_value)
+        command = [
+            "scene-wiki",
+            "build-run",
+            str(run_dir),
+            str(vault_dir),
+            "--site-title",
+            title,
+            "--output-dir",
+            str(output_dir),
+            "--wiki-dir",
+            str(workdir / "wiki"),
+            "--reset-extraction",
+        ]
+        log_event(
+            base_url,
+            job["id"],
+            "Reusing saved scrape and restarting analysis from chunk 1.",
+            payload={"runDir": str(run_dir)},
+        )
+    else:
+        command = [
+            "scene-wiki",
+            "build-substack",
+            job["sourceUrl"],
+            "--subject",
+            title,
+            "--site-title",
+            title,
+            "--output-dir",
+            str(output_dir),
+            "--vault-dir",
+            str(vault_dir),
+        ]
+        max_articles = os.getenv("SCENE_WIKI_MAX_ARTICLES", "").strip()
+        if max_articles:
+            command.extend(["--max-articles", max_articles])
     tracker = BuildProgressTracker(base_url=base_url, job_id=job["id"], start_time=time.monotonic())
     run_logged_command(
         command,
