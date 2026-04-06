@@ -9,6 +9,16 @@ from .scene_search import build_scene_search_assets
 from .scene_wiki import build_scene_wiki
 
 
+def _quartz_build_env() -> dict[str, str]:
+    env = os.environ.copy()
+    node_options = env.get("NODE_OPTIONS", "").strip()
+    if "max-old-space-size" not in node_options:
+        extra = env.get("SCENE_WIKI_NODE_MAX_OLD_SPACE_MB", "6144").strip()
+        if extra:
+            env["NODE_OPTIONS"] = (f"{node_options} --max-old-space-size={extra}").strip()
+    return env
+
+
 def build_quartz_site(
     wiki_dir: Path,
     output_dir: Path,
@@ -29,7 +39,7 @@ def build_quartz_site(
         ],
         cwd=wiki_dir,
         check=True,
-        env=os.environ.copy(),
+        env=_quartz_build_env(),
     )
 
 

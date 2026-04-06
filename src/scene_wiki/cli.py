@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -15,6 +16,14 @@ from .substack import scrape_substack_archive
 
 
 app = typer.Typer(help="Generate an Obsidian-style Quartz wiki from a Substack archive.")
+
+
+def _default_quartz_concurrency() -> int:
+    raw = os.getenv("SCENE_WIKI_QUARTZ_CONCURRENCY", "1").strip()
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 1
 
 
 @app.command("scrape-substack")
@@ -85,7 +94,7 @@ def build_run_command(
     vault_dir: Path,
     wiki_dir: Path = Path("wiki"),
     output_dir: Path = Path("dist/wiki"),
-    quartz_concurrency: int = 3,
+    quartz_concurrency: int = _default_quartz_concurrency(),
     site_title: Optional[str] = None,
     reset_extraction: bool = False,
 ) -> None:
@@ -132,7 +141,7 @@ def build_substack_command(
     max_articles: Optional[int] = None,
     model: str = "sonnet",
     workers: int = 10,
-    quartz_concurrency: int = 3,
+    quartz_concurrency: int = _default_quartz_concurrency(),
     run_dir: Optional[Path] = None,
     vault_dir: Optional[Path] = None,
     wiki_dir: Path = Path("wiki"),
