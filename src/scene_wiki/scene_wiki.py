@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -175,6 +176,15 @@ def _slugify(value: str) -> str:
     return text.strip("-") or "item"
 
 
+def _bounded_slug(value: str, *, max_length: int = 96) -> str:
+    slug = _slugify(value)
+    if len(slug) <= max_length:
+        return slug
+    digest = hashlib.sha1(slug.encode("utf-8")).hexdigest()[:10]
+    prefix_length = max(16, max_length - len(digest) - 1)
+    return f"{slug[:prefix_length].rstrip('-')}-{digest}"
+
+
 def _category_shard_label(name: str) -> str:
     stripped = name.strip()
     if not stripped:
@@ -192,7 +202,7 @@ def build_entity_note_paths(entities: list[dict[str, Any]]) -> dict[int, str]:
     seen_entity_slugs: dict[tuple[str, str], int] = defaultdict(int)
     for idx, entity in enumerate(entities):
         category = entity["category"]
-        base_slug = _slugify(entity["name"])
+        base_slug = _bounded_slug(entity["name"])
         key = (category, base_slug)
         seen_entity_slugs[key] += 1
         if seen_entity_slugs[key] == 1:
