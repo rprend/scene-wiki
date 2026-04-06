@@ -502,10 +502,11 @@ def scrape_substack_archive(
         max_estimated_input_tokens = int(os.getenv("SCENE_WIKI_MAX_ESTIMATED_INPUT_TOKENS", "0") or "0")
         if max_estimated_input_tokens and cost_estimate["estimatedInputTokens"] > max_estimated_input_tokens:
             raise SystemExit(
-                "Estimated extraction cost too high for this archive: "
-                f"{cost_estimate['estimatedInputTokens']:,} input tokens across about "
-                f"{cost_estimate['estimatedTotalChunks']:,} chunks and {len(filtered_posts):,} posts. "
-                f"Cap is {max_estimated_input_tokens:,} input tokens."
+                "Preflight budget check stopped this run before analysis started. "
+                f"This archive is estimated at {cost_estimate['estimatedInputTokens']:,} input tokens "
+                f"across about {cost_estimate['estimatedTotalChunks']:,} chunks and {len(filtered_posts):,} posts, "
+                f"which is above the current cap of {max_estimated_input_tokens:,} input tokens. "
+                "Raise SCENE_WIKI_MAX_ESTIMATED_INPUT_TOKENS or run a smaller slice of the archive to continue."
             )
 
         extracted_posts: list[ExtractedPost] = []
