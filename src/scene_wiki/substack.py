@@ -24,6 +24,9 @@ DEFAULT_TIMEOUT = 30.0
 MAX_RETRIES = 6
 USER_AGENT = "Mozilla/5.0 (compatible; scene-wiki/0.1; +https://example.invalid)"
 DEFAULT_COST_SAMPLE_POSTS = 12
+DEFAULT_ARCHIVE_PAGE_DELAY_SECONDS = 1.5
+DEFAULT_POST_FETCH_DELAY_SECONDS = 1.0
+DEFAULT_RATE_LIMIT_BASE_SECONDS = 15.0
 
 
 class BodyTextExtractor(HTMLParser):
@@ -134,6 +137,13 @@ class ExtractedPost:
     body_html: str = ""
 
 
+@dataclass
+class ArchiveCheckpoint:
+    posts: list[dict[str, Any]]
+    seen_ids: set[int]
+    offset: int
+
+
 def slugify(value: str) -> str:
     text = re.sub(r"[^a-z0-9]+", "-", value.strip().lower())
     return text.strip("-") or "document"
@@ -141,6 +151,51 @@ def slugify(value: str) -> str:
 
 def sanitize_text(text: str) -> str:
     return text.encode("utf-8", "ignore").decode("utf-8")
+
+
+def _archive_page_delay_seconds() -> float:
+    return float(os.getenv("SCENE_WIKI_ARCHIVE_PAGE_DELAY_SECONDS", str(DEFAULT_ARCHIVE_PAGE_DELAY_SECONDS)))
+
+
+def _post_fetch_delay_seconds() -> float:
+    return float(os.getenv("SCENE_WIKI_POST_FETCH_DELAY_SECONDS", str(DEFAULT_POST_FETCH_DELAY_SECONDS)))
+
+
+def _rate_limit_base_seconds() -> float:
+    return float(os.getenv("SCENE_WIKI_RATE_LIMIT_BASE_SECONDS", str(DEFAULT_RATE_LIMIT_BASE_SECONDS)))
+
+
+def checkpoint_key(archive_url: str, section_slug: str | None = None) -> str:
+    host = urlparse(archive_url).hostname or "substack"
+    label = f"{host}-{section_slug or 'all'}"
+    return slugify(label)
+
+
+def load_archive_checkpoint(path: Path) -> ArchiveCheckpoint | None:
+    if not path.exists():
+        return None
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    posts = payload.get("posts")
+    if not isinstance(posts, list):
+        return None
+    offset = int(payload.get("offset", 0))
+    seen_ids = {
+        post.get("id")
+        for post in posts
+        if isinstance(post, dict) and isinstance(post.get("id"), int)
+    }
+    return ArchiveCheckpoint(posts=posts, seen_ids=seen_ids, offset=offset)
+
+
+def save_archive_checkpoint(path: Path, *, archive_url: str, posts: list[dict[str, Any]], offset: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "archiveUrl": archive_url,
+        "savedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "offset": offset,
+        "posts": posts,
+    }
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
 def _decode_preloads_json(html: str) -> dict[str, Any]:
@@ -167,7 +222,11 @@ def get_with_retries(client: httpx.Client, url: str, **kwargs: Any) -> httpx.Res
             response = client.get(url, **kwargs)
             if response.status_code == 429:
                 retry_after = response.headers.get("Retry-After")
-                sleep_seconds = float(retry_after) if retry_after and retry_after.isdigit() else min(2**attempt, 30)
+                sleep_seconds = (
+                    float(retry_after)
+                    if retry_after and retry_after.isdigit()
+                    else min(_rate_limit_base_seconds() * (2**attempt), 180)
+                )
                 print(
                     f"Rate limited for {url}; sleeping {sleep_seconds:.1f}s before retry.",
                     flush=True,
@@ -179,7 +238,7 @@ def get_with_retries(client: httpx.Client, url: str, **kwargs: Any) -> httpx.Res
             return response
         except (httpx.HTTPError, httpx.TimeoutException) as exc:
             last_error = exc
-            sleep_seconds = min(2**attempt, 30)
+            sleep_seconds = min(max(2**attempt, 1), 30)
             print(
                 f"Request failed for {url}: {exc.__class__.__name__}: {exc}. Sleeping {sleep_seconds:.1f}s.",
                 flush=True,
@@ -190,11 +249,27 @@ def get_with_retries(client: httpx.Client, url: str, **kwargs: Any) -> httpx.Res
     raise RuntimeError(f"Request failed without an exception for {url}")
 
 
-def fetch_archive_posts(client: httpx.Client, archive_url: str, max_posts: int | None = None) -> list[dict[str, Any]]:
+def fetch_archive_posts(
+    client: httpx.Client,
+    archive_url: str,
+    *,
+    checkpoint_path: Path | None = None,
+    max_posts: int | None = None,
+) -> list[dict[str, Any]]:
     base = archive_url.rstrip("/")
-    all_posts: list[dict[str, Any]] = []
-    seen_ids: set[int] = set()
-    offset = 0
+    checkpoint = load_archive_checkpoint(checkpoint_path) if checkpoint_path else None
+    if checkpoint:
+        all_posts = checkpoint.posts
+        seen_ids = checkpoint.seen_ids
+        offset = checkpoint.offset
+        print(
+            f"Loaded archive checkpoint {checkpoint_path} with {len(all_posts)} posts at offset={offset}.",
+            flush=True,
+        )
+    else:
+        all_posts = []
+        seen_ids = set()
+        offset = 0
 
     while True:
         print(
@@ -219,6 +294,13 @@ def fetch_archive_posts(client: httpx.Client, archive_url: str, max_posts: int |
                 all_posts.append(item)
                 new_count += 1
                 if max_posts is not None and len(all_posts) >= max_posts:
+                    if checkpoint_path:
+                        save_archive_checkpoint(
+                            checkpoint_path,
+                            archive_url=archive_url,
+                            posts=all_posts,
+                            offset=offset,
+                        )
                     print(f"Reached max_articles={max_posts}; stopping archive pagination.", flush=True)
                     return all_posts
 
@@ -226,11 +308,21 @@ def fetch_archive_posts(client: httpx.Client, archive_url: str, max_posts: int |
             f"Archive page offset={offset} returned {len(batch)} posts, {new_count} new, total={len(all_posts)}",
             flush=True,
         )
+        next_offset = offset + ARCHIVE_PAGE_SIZE
+        if checkpoint_path:
+            save_archive_checkpoint(
+                checkpoint_path,
+                archive_url=archive_url,
+                posts=all_posts,
+                offset=next_offset,
+            )
         if len(batch) < ARCHIVE_PAGE_SIZE or new_count == 0:
             break
 
-        offset += ARCHIVE_PAGE_SIZE
-        time.sleep(0.5)
+        offset = next_offset
+        sleep_seconds = _archive_page_delay_seconds()
+        print(f"Sleeping {sleep_seconds:.1f}s before next archive page.", flush=True)
+        time.sleep(sleep_seconds)
 
     return all_posts
 
@@ -365,9 +457,18 @@ def scrape_substack_archive(
         headers["Referer"] = f"{archive_url.rstrip('/')}/account/cancel"
 
     subject_name = subject or infer_subject(archive_url, section_slug=section_slug)
+    checkpoint_path = (
+        Path(os.getenv("SCENE_WIKI_CHECKPOINT_DIR", "data/archive-checkpoints"))
+        / f"{checkpoint_key(archive_url, section_slug=section_slug)}.json"
+    ).resolve()
 
     with httpx.Client(headers=headers, follow_redirects=True, timeout=DEFAULT_TIMEOUT) as client:
-        archive_posts = fetch_archive_posts(client, archive_url, max_posts=max_articles)
+        archive_posts = fetch_archive_posts(
+            client,
+            archive_url,
+            checkpoint_path=checkpoint_path,
+            max_posts=max_articles,
+        )
         print(f"Fetched {len(archive_posts)} archive entries before filtering.", flush=True)
         filtered_posts = archive_posts
         if section_slug:
@@ -416,7 +517,9 @@ def scrape_substack_archive(
             else:
                 print(f"Reusing sampled post {index}/{len(filtered_posts)}: {post['canonical_url']}", flush=True)
             extracted_posts.append(extracted)
-            time.sleep(1.0)
+            sleep_seconds = _post_fetch_delay_seconds()
+            print(f"Sleeping {sleep_seconds:.1f}s before next post fetch.", flush=True)
+            time.sleep(sleep_seconds)
 
     if run_dir is None:
         run_dir, metadata = make_run(
