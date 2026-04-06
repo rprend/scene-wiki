@@ -163,17 +163,28 @@ def get_with_retries(client: httpx.Client, url: str, **kwargs: Any) -> httpx.Res
     last_error: Exception | None = None
     for attempt in range(MAX_RETRIES):
         try:
+            print(f"HTTP GET {url} attempt {attempt + 1}/{MAX_RETRIES}", flush=True)
             response = client.get(url, **kwargs)
             if response.status_code == 429:
                 retry_after = response.headers.get("Retry-After")
                 sleep_seconds = float(retry_after) if retry_after and retry_after.isdigit() else min(2**attempt, 30)
+                print(
+                    f"Rate limited for {url}; sleeping {sleep_seconds:.1f}s before retry.",
+                    flush=True,
+                )
                 time.sleep(sleep_seconds)
                 continue
             response.raise_for_status()
+            print(f"HTTP {response.status_code} for {url}", flush=True)
             return response
         except (httpx.HTTPError, httpx.TimeoutException) as exc:
             last_error = exc
-            time.sleep(min(2**attempt, 30))
+            sleep_seconds = min(2**attempt, 30)
+            print(
+                f"Request failed for {url}: {exc.__class__.__name__}: {exc}. Sleeping {sleep_seconds:.1f}s.",
+                flush=True,
+            )
+            time.sleep(sleep_seconds)
     if last_error is not None:
         raise last_error
     raise RuntimeError(f"Request failed without an exception for {url}")
@@ -186,6 +197,10 @@ def fetch_archive_posts(client: httpx.Client, archive_url: str, max_posts: int |
     offset = 0
 
     while True:
+        print(
+            f"Fetching archive page offset={offset} limit={ARCHIVE_PAGE_SIZE} collected={len(all_posts)}",
+            flush=True,
+        )
         response = get_with_retries(
             client,
             f"{base}/api/v1/archive",
@@ -193,6 +208,7 @@ def fetch_archive_posts(client: httpx.Client, archive_url: str, max_posts: int |
         )
         batch = response.json()
         if not isinstance(batch, list) or not batch:
+            print(f"Archive page offset={offset} returned no posts; stopping archive pagination.", flush=True)
             break
 
         new_count = 0
@@ -203,8 +219,13 @@ def fetch_archive_posts(client: httpx.Client, archive_url: str, max_posts: int |
                 all_posts.append(item)
                 new_count += 1
                 if max_posts is not None and len(all_posts) >= max_posts:
+                    print(f"Reached max_articles={max_posts}; stopping archive pagination.", flush=True)
                     return all_posts
 
+        print(
+            f"Archive page offset={offset} returned {len(batch)} posts, {new_count} new, total={len(all_posts)}",
+            flush=True,
+        )
         if len(batch) < ARCHIVE_PAGE_SIZE or new_count == 0:
             break
 
@@ -215,11 +236,16 @@ def fetch_archive_posts(client: httpx.Client, archive_url: str, max_posts: int |
 
 
 def fetch_post_text(client: httpx.Client, url: str) -> ExtractedPost:
+    print(f"Fetching post body {url}", flush=True)
     response = get_with_retries(client, url)
     preloads = _decode_preloads_json(response.text)
     post = preloads["post"]
     body_html = post.get("body_html") or ""
     text = _extract_text_from_html(body_html)
+    print(
+        f"Fetched post body {post['canonical_url']} title={sanitize_text(post['title'])!r} chars={len(text)}",
+        flush=True,
+    )
     return ExtractedPost(
         post_id=post["id"],
         slug=post["slug"],
@@ -272,7 +298,11 @@ def estimate_archive_cost(
     sample_lengths: list[int] = []
     sample_chunk_counts: list[int] = []
 
-    for post in sampled_posts:
+    for index, post in enumerate(sampled_posts, start=1):
+        print(
+            f"Sampling post {index}/{len(sampled_posts)} for cost estimate: {post['canonical_url']}",
+            flush=True,
+        )
         extracted = fetch_post_text(client, post["canonical_url"])
         sampled_extracted[post["id"]] = extracted
         text_length = len(extracted.text)
@@ -338,18 +368,35 @@ def scrape_substack_archive(
 
     with httpx.Client(headers=headers, follow_redirects=True, timeout=DEFAULT_TIMEOUT) as client:
         archive_posts = fetch_archive_posts(client, archive_url, max_posts=max_articles)
+        print(f"Fetched {len(archive_posts)} archive entries before filtering.", flush=True)
         filtered_posts = archive_posts
         if section_slug:
             filtered_posts = [post for post in archive_posts if post.get("section_slug") == section_slug]
+            print(
+                f"Filtered archive to section={section_slug}; {len(filtered_posts)} posts remain.",
+                flush=True,
+            )
         if max_articles is not None:
             filtered_posts = filtered_posts[:max_articles]
+            print(f"Applied max_articles={max_articles}; {len(filtered_posts)} posts remain.", flush=True)
 
         sample_size = int(os.getenv("SCENE_WIKI_COST_SAMPLE_POSTS", str(DEFAULT_COST_SAMPLE_POSTS)))
+        print(
+            f"Estimating extraction cost using sample_size={sample_size} across {len(filtered_posts)} posts.",
+            flush=True,
+        )
         cost_estimate, sampled_extracted = estimate_archive_cost(
             client,
             filtered_posts,
             subject_name=subject_name,
             sample_size=sample_size,
+        )
+        print(
+            "Estimated extraction: "
+            f"{cost_estimate['estimatedTotalChunks']} chunks / "
+            f"{cost_estimate['estimatedInputTokens']} input tokens / "
+            f"avg chars {cost_estimate['averageTextCharacters']}",
+            flush=True,
         )
         max_estimated_input_tokens = int(os.getenv("SCENE_WIKI_MAX_ESTIMATED_INPUT_TOKENS", "0") or "0")
         if max_estimated_input_tokens and cost_estimate["estimatedInputTokens"] > max_estimated_input_tokens:
@@ -361,10 +408,13 @@ def scrape_substack_archive(
             )
 
         extracted_posts: list[ExtractedPost] = []
-        for post in filtered_posts:
+        for index, post in enumerate(filtered_posts, start=1):
             extracted = sampled_extracted.get(post["id"])
             if extracted is None:
+                print(f"Fetching archive post {index}/{len(filtered_posts)}: {post['canonical_url']}", flush=True)
                 extracted = fetch_post_text(client, post["canonical_url"])
+            else:
+                print(f"Reusing sampled post {index}/{len(filtered_posts)}: {post['canonical_url']}", flush=True)
             extracted_posts.append(extracted)
             time.sleep(1.0)
 

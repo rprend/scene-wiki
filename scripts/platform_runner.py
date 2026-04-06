@@ -3,10 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import queue
 import re
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -318,11 +320,33 @@ def run_logged_command(
     recent_lines: deque[str] = deque(maxlen=50)
     last_heartbeat = time.monotonic()
     assert process.stdout is not None
-    for line in process.stdout:
-        append_log(log_path, line)
-        recent_lines.append(line.rstrip())
-        if on_line:
-            on_line(line)
+
+    lines: queue.Queue[str | None] = queue.Queue()
+
+    def read_stdout() -> None:
+        assert process.stdout is not None
+        for line in process.stdout:
+            lines.put(line)
+        lines.put(None)
+
+    reader = threading.Thread(target=read_stdout, daemon=True)
+    reader.start()
+
+    while True:
+        try:
+            line = lines.get(timeout=1.0)
+        except queue.Empty:
+            line = None
+
+        if line is None:
+            if process.poll() is not None and lines.empty():
+                break
+        else:
+            append_log(log_path, line)
+            recent_lines.append(line.rstrip())
+            if on_line:
+                on_line(line)
+
         if base_url and job_id and time.monotonic() - last_heartbeat >= 15:
             heartbeat(base_url, job_id, heartbeat_message)
             last_heartbeat = time.monotonic()
