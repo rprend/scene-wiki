@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from .chunking import chunk_documents
 from .models import NormalizedDocument
+from .openai_usage import record_openai_usage
 from .storage import write_json
 
 
@@ -152,6 +153,9 @@ def extract_newsletter_chunk_openai(
     subject: str,
     chunk_text: str,
     model: str | None = None,
+    *,
+    chunk_id: str | None = None,
+    doc_id: str | None = None,
 ) -> NewsletterExtractionBatch:
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
@@ -159,11 +163,47 @@ def extract_newsletter_chunk_openai(
 
     prompt = NEWSLETTER_EXTRACTION_PROMPT.replace("SUBJECT_PLACEHOLDER", subject).replace("TEXT_PLACEHOLDER", chunk_text)
     client = OpenAI(api_key=api_key)
+    resolved_model = model or os.getenv("SCENE_WIKI_EXTRACTION_OPENAI_MODEL", "gpt-4.1-mini")
     response = client.responses.create(
-        model=model or os.getenv("SCENE_WIKI_EXTRACTION_OPENAI_MODEL", "gpt-4.1-mini"),
+        model=resolved_model,
         input=prompt,
         max_output_tokens=4000,
     )
+    usage = getattr(response, "usage", None)
+    input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+    output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+    total_tokens = int(getattr(usage, "total_tokens", input_tokens + output_tokens) or (input_tokens + output_tokens))
+    usage_event = record_openai_usage(
+        requested_model=resolved_model,
+        resolved_model=getattr(response, "model", None),
+        response_id=getattr(response, "id", None),
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
+        prompt_chars=len(prompt),
+        chunk_id=chunk_id,
+        doc_id=doc_id,
+    )
+    print(
+        "    OpenAI usage "
+        f"model={usage_event['resolvedModel']} "
+        f"input={input_tokens} output={output_tokens} total={total_tokens} "
+        f"est_cost_usd={usage_event['estimatedCostUsd']} "
+        f"chunk={chunk_id or 'unknown'}",
+        flush=True,
+    )
+    totals = usage_event.get("totals") or {}
+    calls = int(totals.get("calls", 0) or 0)
+    if calls and calls % 50 == 0:
+        print(
+            "    OpenAI cumulative "
+            f"calls={calls} "
+            f"input={totals.get('inputTokens', 0)} "
+            f"output={totals.get('outputTokens', 0)} "
+            f"total={totals.get('totalTokens', 0)} "
+            f"est_cost_usd={totals.get('estimatedCostUsd', 0)}",
+            flush=True,
+        )
     text_content = response.output_text.strip()
     if "```json" in text_content:
         text_content = text_content.split("```json", 1)[1].split("```", 1)[0].strip()
@@ -189,15 +229,30 @@ def extract_newsletter_chunk(
     subject: str,
     chunk_text: str,
     model: str = "sonnet",
+    *,
+    chunk_id: str | None = None,
+    doc_id: str | None = None,
 ) -> NewsletterExtractionBatch:
     backend = os.getenv("SCENE_WIKI_EXTRACTION_BACKEND", "").strip().lower()
     if backend == "openai":
-        return extract_newsletter_chunk_openai(subject=subject, chunk_text=chunk_text, model=None)
+        return extract_newsletter_chunk_openai(
+            subject=subject,
+            chunk_text=chunk_text,
+            model=None,
+            chunk_id=chunk_id,
+            doc_id=doc_id,
+        )
     if backend == "claude":
         return extract_newsletter_chunk_claude(subject=subject, chunk_text=chunk_text, model=model)
 
     if os.getenv("OPENAI_API_KEY", "").strip():
-        return extract_newsletter_chunk_openai(subject=subject, chunk_text=chunk_text, model=None)
+        return extract_newsletter_chunk_openai(
+            subject=subject,
+            chunk_text=chunk_text,
+            model=None,
+            chunk_id=chunk_id,
+            doc_id=doc_id,
+        )
     return extract_newsletter_chunk_claude(subject=subject, chunk_text=chunk_text, model=model)
 
 
@@ -220,7 +275,13 @@ def _extract_single_chunk(
         except (json.JSONDecodeError, KeyError):
             pass
 
-    batch = extract_newsletter_chunk(subject=subject, chunk_text=chunk.text, model=model)
+    batch = extract_newsletter_chunk(
+        subject=subject,
+        chunk_text=chunk.text,
+        model=model,
+        chunk_id=chunk.chunk_id,
+        doc_id=chunk.doc_id,
+    )
     doc = doc_by_id.get(chunk.doc_id)
     published_at = doc.published_at if doc else None
 

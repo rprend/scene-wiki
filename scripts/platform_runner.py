@@ -253,6 +253,25 @@ class BuildProgressTracker:
             )
             return
 
+        openai_cumulative_match = re.match(
+            r"OpenAI cumulative calls=(\d+)\s+input=(\d+)\s+output=(\d+)\s+total=(\d+)\s+est_cost_usd=([0-9.]+)",
+            text,
+        )
+        if openai_cumulative_match:
+            self.emit(
+                "OpenAI usage checkpoint.",
+                stage="analysis",
+                overall_progress_pct=None,
+                payload={
+                    "calls": int(openai_cumulative_match.group(1)),
+                    "inputTokens": int(openai_cumulative_match.group(2)),
+                    "outputTokens": int(openai_cumulative_match.group(3)),
+                    "totalTokens": int(openai_cumulative_match.group(4)),
+                    "estimatedCostUsd": float(openai_cumulative_match.group(5)),
+                },
+            )
+            return
+
         done_match = re.match(r"Done:\s+(\d+) total chunks", text)
         if done_match:
             total_chunks = int(done_match.group(1))

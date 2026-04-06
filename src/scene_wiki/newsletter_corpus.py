@@ -4,9 +4,11 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+import os
 
 from .link_extraction import extract_all_links, save_link_manifests
 from .newsletter_extraction import CorpusEntityAggregate, extract_all_documents
+from .openai_usage import reset_usage_summary
 from .storage import load_normalized_documents, read_json, write_json
 
 
@@ -153,6 +155,12 @@ def build_newsletter_corpus(
         per_chunk_results: list[dict[str, Any]] = []
     else:
         documents = load_normalized_documents(run_dir)
+        usage_dir = run_dir / "artifacts" / "openai-usage"
+        os.environ["SCENE_WIKI_AI_USAGE_DIR"] = str(usage_dir)
+        reset_usage_summary()
+        resolved_model = os.getenv("SCENE_WIKI_EXTRACTION_OPENAI_MODEL", "gpt-4.1-mini")
+        print(f"  OpenAI extraction model: {resolved_model}", flush=True)
+        print(f"  OpenAI usage log dir: {usage_dir}", flush=True)
         per_chunk_results, entities = extract_all_documents(
             documents=documents,
             subject=subject,
