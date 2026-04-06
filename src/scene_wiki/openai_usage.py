@@ -93,6 +93,8 @@ def record_openai_usage(
     output_tokens: int,
     total_tokens: int,
     prompt_chars: int,
+    prompt_text: str,
+    response_text: str,
     chunk_id: str | None = None,
     doc_id: str | None = None,
 ) -> dict[str, Any]:
@@ -108,6 +110,8 @@ def record_openai_usage(
         "chunkId": chunk_id,
         "docId": doc_id,
         "promptChars": prompt_chars,
+        "promptText": prompt_text,
+        "responseText": response_text,
         "inputTokens": input_tokens,
         "outputTokens": output_tokens,
         "totalTokens": total_tokens,

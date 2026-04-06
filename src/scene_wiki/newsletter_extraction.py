@@ -181,6 +181,8 @@ def extract_newsletter_chunk_openai(
         output_tokens=output_tokens,
         total_tokens=total_tokens,
         prompt_chars=len(prompt),
+        prompt_text=prompt,
+        response_text=response.output_text,
         chunk_id=chunk_id,
         doc_id=doc_id,
     )
