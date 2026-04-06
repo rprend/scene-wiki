@@ -274,6 +274,18 @@ body[data-slug="index"] .status-details p {
   margin: 0;
 }
 
+body[data-slug="index"] .status-meta-inline {
+  margin-bottom: 0.55rem;
+  font-size: 0.82rem;
+}
+
+body[data-slug="index"] .status-meta-inline code {
+  font-size: 0.78rem;
+  color: var(--darkgray);
+  background: transparent;
+  padding: 0;
+}
+
 body[data-slug="index"] .status-error {
   margin-bottom: 0.6rem;
   color: #b91c1c;

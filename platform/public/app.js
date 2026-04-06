@@ -139,6 +139,12 @@ function renderStatus(job, events = []) {
   const spinnerClass = job.status === "deployed" ? "status-done" : job.status === "failed" ? "status-failed" : ""
   const lines = []
 
+  lines.push(`
+    <p class="status-meta-inline">
+      Watching job <code>${escapeHtml(job.id)}</code> · queued ${escapeHtml(formatDate(job.queueTime))} · updated ${escapeHtml(formatDate(job.updatedAt))}
+    </p>
+  `)
+
   if (latestWithProgress?.payload?.overallProgressPct != null) {
     const etaLabel = latestWithProgress.payload.etaLabel || formatDuration(latestWithProgress.payload.etaSeconds)
     const stage = latestWithProgress.payload.stage || "running"
@@ -200,7 +206,6 @@ function renderStatus(job, events = []) {
         </div>
       </summary>
       <div class="status-details">
-        <p class="status-meta-inline">Job ${escapeHtml(job.id)} · queued ${escapeHtml(formatDate(job.queueTime))} · updated ${escapeHtml(formatDate(job.updatedAt))}</p>
         ${lines.join("")}
       </div>
     </details>
@@ -314,7 +319,9 @@ function startPolling(jobId) {
 
 async function loadInitialJob() {
   const url = new URL(window.location.href)
-  const jobId = url.searchParams.get("job") || window.localStorage.getItem(LAST_JOB_STORAGE_KEY)
+  const urlJobId = url.searchParams.get("job")
+  const savedJobId = window.localStorage.getItem(LAST_JOB_STORAGE_KEY)
+  const jobId = urlJobId || savedJobId
   if (!jobId) {
     return
   }
@@ -324,7 +331,11 @@ async function loadInitialJob() {
     if (!["deployed", "failed"].includes(job.status)) {
       startPolling(jobId)
     } else {
-      persistActiveJob(jobId)
+      if (urlJobId) {
+        persistActiveJob(jobId)
+      } else {
+        persistActiveJob(null)
+      }
     }
   } catch {
     persistActiveJob(null)
