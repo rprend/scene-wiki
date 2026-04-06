@@ -13,7 +13,10 @@ kill_timeout = "5m"
   RUNNER_POLL_SECONDS = "20"
   SCENE_WIKI_EXTRACTION_BACKEND = "openai"
   SCENE_WIKI_ROOT = "/app"
+  SCENE_WIKI_DATA_ROOT = "/data/scene-wiki-data"
+  SCENE_WIKI_CHECKPOINT_DIR = "/data/archive-checkpoints"
   RUNNER_WORKDIR = "/app"
+  RUNNER_LOG_ROOT = "/data/logs"
 
 [processes]
   app = "python3 scripts/platform_runner.py --env-file /app/.missing-env --workdir /app"
@@ -22,3 +25,7 @@ kill_timeout = "5m"
   cpus = 1
   memory = "8gb"
   cpu_kind = "performance"
+
+[[mounts]]
+  source = "scene_wiki_data"
+  destination = "/data"

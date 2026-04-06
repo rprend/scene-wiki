@@ -66,7 +66,8 @@ def api_request(base_url: str, path: str, method: str = "GET", payload: dict | N
 
 
 def build_log_path(workdir: Path, job_id: str) -> Path:
-    log_dir = workdir / "logs" / "jobs"
+    root = Path(os.getenv("RUNNER_LOG_ROOT", str(workdir / "logs"))).expanduser().resolve()
+    log_dir = root / "jobs"
     log_dir.mkdir(parents=True, exist_ok=True)
     return log_dir / f"{job_id}.log"
 
@@ -140,6 +141,7 @@ class BuildProgressTracker:
         self.last_progress_key: tuple[str, int | None, str] | None = None
         self.corpus_total_chunks: int | None = None
         self.corpus_completed_chunks = 0
+        self.current_run_dir: str | None = None
 
     def emit(self, message: str, *, stage: str, overall_progress_pct: int | None = None, payload: dict | None = None) -> None:
         combined_payload = dict(payload or {})
@@ -182,6 +184,7 @@ class BuildProgressTracker:
             archive_posts_selected = int(scrape_match.group(2))
             total_text_characters = int(scrape_match.group(3))
             run_dir = scrape_match.group(4)
+            self.current_run_dir = run_dir
             self.emit(
                 "Archive scrape complete.",
                 stage="scrape",
@@ -197,6 +200,7 @@ class BuildProgressTracker:
 
         if text.startswith("Building newsletter corpus in "):
             run_dir = text.replace("Building newsletter corpus in ", "", 1)
+            self.current_run_dir = run_dir
             self.start_stage(
                 "analysis",
                 "Analyzing newsletter content.",
@@ -509,7 +513,7 @@ def add_custom_domain(project_name: str, domain_name: str) -> None:
         raise RuntimeError(f"Attaching custom domain failed: {json.dumps(payload)}")
 
 
-def run_scene_wiki_build(job: dict, workdir: Path, custom_domain: str, log_path: Path, base_url: str) -> Path:
+def run_scene_wiki_build(job: dict, workdir: Path, custom_domain: str, log_path: Path, base_url: str) -> tuple[Path, str | None]:
     title = job.get("title") or job["siteSlug"].replace("-", " ").title()
     output_dir = workdir / "dist" / "generated" / job["siteSlug"]
     vault_dir = workdir / "vault" / job["siteSlug"]
@@ -563,7 +567,7 @@ def run_scene_wiki_build(job: dict, workdir: Path, custom_domain: str, log_path:
         heartbeat_message="",
         on_line=tracker.handle_line,
     )
-    return output_dir
+    return output_dir, tracker.current_run_dir or run_dir_value or None
 
 
 def handle_job(base_url: str, job: dict, workdir: Path) -> None:
@@ -579,7 +583,7 @@ def handle_job(base_url: str, job: dict, workdir: Path) -> None:
         log_event(base_url, job["id"], "Runner log initialized.", payload={"logPath": str(log_path)})
         heartbeat(base_url, job["id"], "Starting scene wiki build.")
         log_event(base_url, job["id"], "Building static wiki output.", payload={"project_name": project_name})
-        output_dir = run_scene_wiki_build(job, workdir, custom_domain, log_path, base_url)
+        output_dir, actual_run_dir = run_scene_wiki_build(job, workdir, custom_domain, log_path, base_url)
 
         heartbeat(base_url, job["id"], "")
         log_event(base_url, job["id"], "Preparing site host.", payload={"stage": "pages-project", "overallProgressPct": 97})
@@ -614,7 +618,7 @@ def handle_job(base_url: str, job: dict, workdir: Path) -> None:
                 "pagesProjectName": project_name,
                 "pagesUrl": pages_url,
                 "customDomain": custom_domain,
-                "runDir": str(workdir / "data"),
+                "runDir": actual_run_dir,
                 "title": job.get("title"),
             },
         )
@@ -630,7 +634,7 @@ def handle_job(base_url: str, job: dict, workdir: Path) -> None:
             base_url,
             f"/api/runner/jobs/{job['id']}/fail",
             method="POST",
-            payload={"errorMessage": str(exc), "runDir": str(workdir / "data")},
+            payload={"errorMessage": str(exc), "runDir": actual_run_dir if 'actual_run_dir' in locals() else job.get("runDir")},
         )
         raise
 

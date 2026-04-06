@@ -538,6 +538,16 @@ async function handleCreateJob(request, env) {
     return jsonResponse({ duplicate: true, job: mapJobRecord(existingActiveJob) })
   }
 
+  const previousJobWithRunDir = await env.SCENE_WIKI_DB.prepare(
+    `SELECT run_dir
+     FROM jobs
+     WHERE source_url = ? AND run_dir IS NOT NULL AND run_dir != ''
+     ORDER BY updated_at DESC
+     LIMIT 1`,
+  )
+    .bind(sourceUrl)
+    .first()
+
   const id = crypto.randomUUID()
   const timestamp = nowIso()
   await env.SCENE_WIKI_DB.batch([
@@ -555,13 +565,27 @@ async function handleCreateJob(request, env) {
     env.SCENE_WIKI_DB.prepare(
       `INSERT INTO jobs (
          id, site_slug, source_url, source_type, status, submitted_by, submitter_ip,
-         queue_time, created_at, updated_at
+         queue_time, created_at, updated_at, run_dir
        )
-       VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)`,
-    ).bind(id, slug, sourceUrl, sourceType, "public", ip || null, timestamp, timestamp, timestamp),
+       VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      id,
+      slug,
+      sourceUrl,
+      sourceType,
+      "public",
+      ip || null,
+      timestamp,
+      timestamp,
+      timestamp,
+      previousJobWithRunDir?.run_dir || null,
+    ),
   ])
 
   await appendEvent(env, id, "info", "Job queued from public submission.", { sourceUrl })
+  if (previousJobWithRunDir?.run_dir) {
+    await appendEvent(env, id, "info", "Reusing saved scrape and chunk cache.", { runDir: previousJobWithRunDir.run_dir })
+  }
   await incrementRateBucket(env, rateBucket.key, rateBucket.count + 1)
 
   const job = await env.SCENE_WIKI_DB.prepare(

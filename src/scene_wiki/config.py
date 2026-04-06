@@ -53,8 +53,9 @@ class Settings:
 def get_settings() -> Settings:
     project_root = _discover_project_root()
     _load_env_files(project_root)
-    data_root = project_root / "data"
-    data_root.mkdir(exist_ok=True)
+    data_root_override = os.getenv("SCENE_WIKI_DATA_ROOT", "").strip()
+    data_root = Path(data_root_override).expanduser().resolve() if data_root_override else (project_root / "data")
+    data_root.mkdir(parents=True, exist_ok=True)
     return Settings(
         project_root=project_root,
         data_root=data_root,
