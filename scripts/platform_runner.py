@@ -16,6 +16,9 @@ from collections import deque
 from pathlib import Path
 
 
+DEFAULT_API_TIMEOUT_SECONDS = 60
+
+
 def load_env_file(path: Path) -> None:
     if not path.exists():
         return
@@ -51,12 +54,15 @@ def api_request(base_url: str, path: str, method: str = "GET", payload: dict | N
         data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
     request = urllib.request.Request(url, data=data, method=method, headers=headers)
+    timeout_seconds = float(os.getenv("SCENE_WIKI_RUNNER_API_TIMEOUT_SECONDS", str(DEFAULT_API_TIMEOUT_SECONDS)))
     try:
-        with urllib.request.urlopen(request, timeout=60) as response:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", "replace")
         raise RuntimeError(f"{method} {path} failed: {exc.code} {body}") from exc
+    except (urllib.error.URLError, TimeoutError, socket.timeout) as exc:
+        raise RuntimeError(f"{method} {path} failed: {exc}") from exc
 
 
 def build_log_path(workdir: Path, job_id: str) -> Path:
@@ -391,21 +397,27 @@ def command_env(job: dict, title: str, custom_domain: str) -> dict[str, str]:
 
 
 def log_event(base_url: str, job_id: str, message: str, level: str = "info", payload: dict | None = None) -> None:
-    api_request(
-        base_url,
-        f"/api/runner/jobs/{job_id}/event",
-        method="POST",
-        payload={"message": message, "level": level, "payload": payload},
-    )
+    try:
+        api_request(
+            base_url,
+            f"/api/runner/jobs/{job_id}/event",
+            method="POST",
+            payload={"message": message, "level": level, "payload": payload},
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"Non-fatal event logging failure for {job_id}: {exc}", flush=True)
 
 
 def heartbeat(base_url: str, job_id: str, message: str) -> None:
-    api_request(
-        base_url,
-        f"/api/runner/jobs/{job_id}/heartbeat",
-        method="POST",
-        payload={"message": message},
-    )
+    try:
+        api_request(
+            base_url,
+            f"/api/runner/jobs/{job_id}/heartbeat",
+            method="POST",
+            payload={"message": message},
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"Non-fatal heartbeat failure for {job_id}: {exc}", flush=True)
 
 
 def ensure_pages_project(project_name: str, workdir: Path, log_path: Path) -> None:
