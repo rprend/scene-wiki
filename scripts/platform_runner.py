@@ -400,6 +400,15 @@ def command_env(job: dict, title: str, custom_domain: str) -> dict[str, str]:
     return env
 
 
+def looks_like_saved_run_dir(path: Path) -> bool:
+    return (
+        path.exists()
+        and path.is_dir()
+        and (path / "metadata.json").exists()
+        and (path / "normalized").exists()
+    )
+
+
 def log_event(base_url: str, job_id: str, message: str, level: str = "info", payload: dict | None = None) -> None:
     try:
         api_request(
@@ -518,7 +527,7 @@ def run_scene_wiki_build(job: dict, workdir: Path, custom_domain: str, log_path:
     output_dir = workdir / "dist" / "generated" / job["siteSlug"]
     vault_dir = workdir / "vault" / job["siteSlug"]
     run_dir_value = (job.get("runDir") or "").strip()
-    if run_dir_value:
+    if run_dir_value and looks_like_saved_run_dir(Path(run_dir_value)):
         run_dir = Path(run_dir_value)
         command = [
             "scene-wiki",
@@ -531,15 +540,19 @@ def run_scene_wiki_build(job: dict, workdir: Path, custom_domain: str, log_path:
             str(output_dir),
             "--wiki-dir",
             str(workdir / "wiki"),
-            "--reset-extraction",
         ]
         log_event(
             base_url,
             job["id"],
-            "Reusing saved scrape and restarting analysis from chunk 1.",
+            "Reusing saved scrape and chunk cache.",
             payload={"runDir": str(run_dir)},
         )
     else:
+        if run_dir_value:
+            print(
+                f"Ignoring invalid saved run dir {run_dir_value!r}; expected metadata.json and normalized/.",
+                flush=True,
+            )
         command = [
             "scene-wiki",
             "build-substack",
@@ -567,7 +580,7 @@ def run_scene_wiki_build(job: dict, workdir: Path, custom_domain: str, log_path:
         heartbeat_message="",
         on_line=tracker.handle_line,
     )
-    return output_dir, tracker.current_run_dir or run_dir_value or None
+    return output_dir, tracker.current_run_dir or (run_dir_value if looks_like_saved_run_dir(Path(run_dir_value)) else None)
 
 
 def handle_job(base_url: str, job: dict, workdir: Path) -> None:

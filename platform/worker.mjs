@@ -120,6 +120,11 @@ function slugify(value) {
     .slice(0, 48) || "scene-wiki"
 }
 
+function isReusableRunDir(runDir) {
+  if (typeof runDir !== "string") return false
+  return /\/runs\/[\w.-]+$/.test(runDir)
+}
+
 async function urlLooksLive(url) {
   try {
     const response = await fetch(url, {
@@ -578,12 +583,12 @@ async function handleCreateJob(request, env) {
       timestamp,
       timestamp,
       timestamp,
-      previousJobWithRunDir?.run_dir || null,
+      isReusableRunDir(previousJobWithRunDir?.run_dir) ? previousJobWithRunDir.run_dir : null,
     ),
   ])
 
   await appendEvent(env, id, "info", "Job queued from public submission.", { sourceUrl })
-  if (previousJobWithRunDir?.run_dir) {
+  if (isReusableRunDir(previousJobWithRunDir?.run_dir)) {
     await appendEvent(env, id, "info", "Reusing saved scrape and chunk cache.", { runDir: previousJobWithRunDir.run_dir })
   }
   await incrementRateBucket(env, rateBucket.key, rateBucket.count + 1)
