@@ -24,7 +24,7 @@ kill_timeout = "5m"
   app = "python3 scripts/platform_runner.py --env-file /app/.missing-env --workdir /app"
 
 [[vm]]
-  cpus = 1
+  cpus = 2
   memory = "16gb"
   cpu_kind = "performance"
 
