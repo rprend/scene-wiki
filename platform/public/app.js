@@ -231,8 +231,8 @@ function persistActiveJob(jobId) {
 
 function renderSites(sites) {
   if (!sites.length) {
-    collectionNote.textContent = "No deployed scene wikis yet."
-    siteList.innerHTML = `<div class="empty-state">The first generated wiki will appear here once a job completes.</div>`
+    collectionNote.textContent = ""
+    siteList.innerHTML = ""
     return
   }
 

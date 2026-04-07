@@ -6,7 +6,7 @@
     <title>Scene Wiki</title>
     <meta
       name="description"
-      content="Paste a publication archive URL to generate a Quartz-style scene wiki and browse the collection."
+      content="Scene Wiki builds searchable wikis for online communities: blogs, Substacks, and podcasts."
     />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
@@ -30,12 +30,10 @@
         <div class="center">
           <article class="popover-hint">
             <h1 id="scene-wiki">Scene Wiki</h1>
-            <p id="platform-tagline">Turn a publication archive into a browseable scene wiki.</p>
-
-            <h2 id="submit">Create a Scene Wiki</h2>
-            <p>
-              Scene Wiki accepts a publication root, runs the scene-mapping pipeline in the background, and publishes the finished Quartz-style wiki at a dedicated subdomain of <code>scenewiki.net</code>.
+            <p id="platform-tagline">
+              Scene Wiki builds a searchable wiki for online communities: blogs, substacks, and podcasts. Every reference becomes an article (books, names, places, ideas, movies, songs). The wiki is the canon of the community. Scene Wiki automatically analyzes and labels the data, so that it's searchable. When finished, Scene Wiki deploys and hosts the Wiki.
             </p>
+
             <form class="collection-form" id="submit-form">
               <label class="field-label" for="source-url">Publication URL</label>
               <div class="submit-row">
@@ -56,7 +54,6 @@
             </form>
 
             <h2 id="collection">Browse the Collection</h2>
-            <p>Only deployed scene wikis appear below. In-progress jobs stay in the section underneath.</p>
             <p class="collection-note" id="collection-note">Loading deployed scene wikis…</p>
             <div class="site-list" id="site-list"></div>
 
