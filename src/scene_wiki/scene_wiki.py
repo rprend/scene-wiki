@@ -62,6 +62,8 @@ CATEGORY_DESCRIPTIONS = {
 }
 
 CATEGORY_INLINE_ENTRY_LIMIT = 1000
+ENTITY_PAGE_MIN_MENTIONS = int(os.environ.get("SCENE_WIKI_ENTITY_PAGE_MIN_MENTIONS", "3"))
+ENTITY_PAGE_MIN_ISSUES = int(os.environ.get("SCENE_WIKI_ENTITY_PAGE_MIN_ISSUES", "2"))
 
 SEARCH_PAGE_BODY = [
     "# Semantic Search",
@@ -316,6 +318,10 @@ def _abstract(text: str, sentence_limit: int = 3) -> str:
 
 
 def _wikilink(path: str, label: str | None = None) -> str:
+    if "#" in path:
+        href = _internal_href(path)
+        link_label = label or Path(path.split("#", 1)[0]).name
+        return f"[{link_label}]({href})"
     if label and label != Path(path).name:
         return f"[[{path}|{label}]]"
     return f"[[{path}]]"
@@ -336,6 +342,16 @@ def _escape_html(value: str) -> str:
 
 def _html_link(path: str, label: str) -> str:
     return f'<a href="{_escape_html(_internal_href(path))}">{_escape_html(label)}</a>'
+
+
+def _reference_note_path(path: str) -> str:
+    return path.split("#", 1)[0]
+
+
+def _should_materialize_entity_page(entity: dict[str, Any], docs: dict[str, dict[str, Any]]) -> bool:
+    mention_count = int(entity.get("mention_count", 0))
+    issue_count = len([doc_id for doc_id in entity.get("post_ids", []) if doc_id in docs])
+    return mention_count >= ENTITY_PAGE_MIN_MENTIONS or issue_count >= ENTITY_PAGE_MIN_ISSUES
 
 
 def _sorted_links(paths: set[str], notes: dict[str, Note]) -> list[str]:
@@ -709,7 +725,9 @@ def _render_category_entity_details(
     entity: dict[str, Any],
     entity_id: int,
     entity_path: str,
-    entity_note_paths: dict[int, str],
+    entity_reference_paths: dict[int, str],
+    entity_note_targets: dict[int, str],
+    anchor_id: str,
     docs: dict[str, dict[str, Any]],
     issue_paths: dict[str, str],
     related_counts: dict[int, Counter[int]],
@@ -744,9 +762,10 @@ def _render_category_entity_details(
         key=lambda item: (-item[1], entities[item[0]]["name"].lower()),
     )[:5]
     external_links = _external_link_values(entity)
+    is_standalone = _reference_note_path(entity_path) == entity_path
 
     lines = [
-        f'<details class="category-entry" data-category-entry data-open="false">',
+        f'<details class="category-entry" id="{_escape_html(anchor_id)}" data-category-entry data-open="false">',
         (
             '<summary class="category-entry-head">'
             f'<span class="category-entry-caret" role="button" tabindex="0" data-category-toggle aria-expanded="false" aria-label="Expand {_escape_html(entity["name"])}"></span>'
@@ -759,7 +778,7 @@ def _render_category_entity_details(
         '<div class="category-entry-content">',
         f'<p class="category-entry-blurb">{_escape_html(_entity_blurb(entity, docs, related_counts, entities, entity_id))}</p>',
         '<dl class="category-facts">',
-        f'<div><dt>Article page</dt><dd>{_html_link(entity_path, entity["name"])}</dd></div>',
+        f'<div><dt>{"Article page" if is_standalone else "Reference entry"}</dt><dd>{_html_link(entity_path, entity["name"])}</dd></div>',
         f'<div><dt>Mention count</dt><dd>{mention_count}</dd></div>',
         f'<div><dt>Issue count</dt><dd>{issue_count}</dd></div>',
         f'<div><dt>First seen</dt><dd>{_escape_html(_human_date(entity.get("first_seen")) or "Unknown")}</dd></div>',
@@ -798,8 +817,8 @@ def _render_category_entity_details(
         lines += ['<div class="category-entry-section"><div class="category-entry-label">Related pages</div><ul>']
         for related_id, count in related:
             related_entity = entities[related_id]
-            related_path = entity_note_paths[related_id]
-            links_to.add(related_path)
+            related_path = entity_reference_paths[related_id]
+            links_to.add(entity_note_targets[related_id])
             lines.append(
                 f'<li>{_html_link(related_path, related_entity["name"])} <span class="category-inline-meta">{count} shared issues</span></li>'
             )
@@ -841,6 +860,7 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
 
     notes: dict[str, Note] = {}
     issue_note_specs: dict[str, tuple[str, dict[str, Any], list[int]]] = {}
+    materialized_entity_ids = {idx for idx, entity in enumerate(entities) if _should_materialize_entity_page(entity, docs)}
 
     category_paths = {category: f"categories/{category}" for category in effective_categories}
     index_paths = {
@@ -853,6 +873,26 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
     issue_count = len(docs)
     entity_count = len(entities)
     category_counts = Counter(entity["category"] for entity in entities)
+    entity_reference_paths = dict(entity_note_paths)
+    entity_note_targets = {idx: entity_note_paths[idx] for idx in range(len(entities))}
+    entity_anchor_ids = {idx: Path(entity_note_paths[idx]).name for idx in range(len(entities))}
+    entities_by_category: dict[str, list[int]] = defaultdict(list)
+    for idx, entity in enumerate(entities):
+        entities_by_category[entity["category"]].append(idx)
+    for category in effective_categories:
+        category_entity_ids = sorted(
+            entities_by_category.get(category, []),
+            key=lambda item: (-int(entities[item].get("mention_count", 0)), entities[item]["name"].lower()),
+        )
+        sharded = len(category_entity_ids) > CATEGORY_INLINE_ENTRY_LIMIT
+        for entity_id in category_entity_ids:
+            if entity_id in materialized_entity_ids:
+                continue
+            anchor_ref = category_paths[category]
+            if sharded:
+                anchor_ref = f"{category_paths[category]}/{_category_shard_label(entities[entity_id]['name'])}"
+            entity_reference_paths[entity_id] = f"{anchor_ref}#{entity_anchor_ids[entity_id]}"
+            entity_note_targets[entity_id] = anchor_ref
 
     home_links = set(category_paths.values()) | set(index_paths.values()) | set(issue_paths.values())
     home_body = [
@@ -895,9 +935,9 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
     for entity_id in top_entities:
         entity = entities[entity_id]
         home_body.append(
-            f"- {_wikilink(entity_note_paths[entity_id], entity['name'])} ({_display_category_title(entity['category'])})"
+            f"- {_wikilink(entity_reference_paths[entity_id], entity['name'])} ({_display_category_title(entity['category'])})"
         )
-        home_links.add(entity_note_paths[entity_id])
+        home_links.add(entity_note_targets[entity_id])
     notes["Home"] = Note(
         path="Home",
         title=site_title,
@@ -919,7 +959,7 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
         entity_ids = doc_entities.get(doc_id, [])
         links_to = {category_paths[entities[idx]["category"]] for idx in entity_ids if entities[idx]["category"] in category_paths}
         for entity_id in entity_ids:
-            links_to.add(entity_note_paths[entity_id])
+            links_to.add(entity_note_targets[entity_id])
 
         notes[issue_path] = Note(
             path=issue_path,
@@ -939,10 +979,6 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
             links_to=links_to,
         )
         issue_note_specs[issue_path] = (doc_id, doc, entity_ids)
-
-    entities_by_category: dict[str, list[int]] = defaultdict(list)
-    for idx, entity in enumerate(entities):
-        entities_by_category[entity["category"]].append(idx)
 
     for category in effective_categories:
         title = _display_category_title(category)
@@ -1004,7 +1040,7 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
                     "",
                     "## Reference Index",
                     "",
-                    "Use the title to open the standalone article. Use the caret to expand a compact inline dossier with source context, issue trail, related pages, and outbound links.",
+                    "Use the title to open the reference entry. Use the caret to expand a compact inline dossier with source context, issue trail, related pages, and outbound links.",
                     "",
                     '<div class="category-index-toolbar">',
                     '<button type="button" class="category-index-button" data-category-expand-all>Expand all</button>',
@@ -1014,12 +1050,17 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
                 ]
                 for entity_id in shard_entity_ids:
                     entity = entities[entity_id]
+                    if entity_id not in materialized_entity_ids:
+                        entity_reference_paths[entity_id] = f"{shard_path}#{entity_anchor_ids[entity_id]}"
+                        entity_note_targets[entity_id] = shard_path
                     shard_body += _render_category_entity_details(
                         run_dir=run_dir,
                         entity=entity,
                         entity_id=entity_id,
-                        entity_path=entity_note_paths[entity_id],
-                        entity_note_paths=entity_note_paths,
+                        entity_path=entity_reference_paths[entity_id],
+                        entity_reference_paths=entity_reference_paths,
+                        entity_note_targets=entity_note_targets,
+                        anchor_id=entity_anchor_ids[entity_id],
                         docs=docs,
                         issue_paths=issue_paths,
                         related_counts=related_counts,
@@ -1027,7 +1068,7 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
                         links_to=shard_links,
                     )
                     shard_body.append("")
-                    shard_links.add(entity_note_paths[entity_id])
+                    shard_links.add(entity_note_targets[entity_id])
                 shard_body += ["", *CATEGORY_INDEX_SCRIPT]
                 notes[shard_path] = Note(
                     path=shard_path,
@@ -1052,7 +1093,7 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
             "",
             "## Reference Index",
             "",
-            "Use the title to open the standalone article. Use the caret to expand a compact inline dossier with source context, issue trail, related pages, and outbound links.",
+            "Use the title to open the reference entry. Use the caret to expand a compact inline dossier with source context, issue trail, related pages, and outbound links.",
             "",
             '<div class="category-index-toolbar">',
             '<button type="button" class="category-index-button" data-category-expand-all>Expand all</button>',
@@ -1062,12 +1103,17 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
         ]
         for entity_id in entity_ids:
             entity = entities[entity_id]
+            if entity_id not in materialized_entity_ids:
+                entity_reference_paths[entity_id] = f"{category_paths[category]}#{entity_anchor_ids[entity_id]}"
+                entity_note_targets[entity_id] = category_paths[category]
             body += _render_category_entity_details(
                 run_dir=run_dir,
                 entity=entity,
                 entity_id=entity_id,
-                entity_path=entity_note_paths[entity_id],
-                entity_note_paths=entity_note_paths,
+                entity_path=entity_reference_paths[entity_id],
+                entity_reference_paths=entity_reference_paths,
+                entity_note_targets=entity_note_targets,
+                anchor_id=entity_anchor_ids[entity_id],
                 docs=docs,
                 issue_paths=issue_paths,
                 related_counts=related_counts,
@@ -1075,7 +1121,7 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
                 links_to=links_to,
             )
             body.append("")
-            links_to.add(entity_note_paths[entity_id])
+            links_to.add(entity_note_targets[entity_id])
         body += ["", *CATEGORY_INDEX_SCRIPT]
         notes[category_paths[category]] = Note(
             path=category_paths[category],
@@ -1097,6 +1143,21 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
     entity_source_refs: dict[str, list[dict[str, Any]]] = {}
 
     for idx, entity in enumerate(entities):
+        if idx not in materialized_entity_ids:
+            path = entity_reference_paths[idx]
+            category = entity["category"]
+            title = entity["name"]
+            issue_count = len([doc_id for doc_id in entity.get("post_ids", []) if doc_id in docs])
+            public_entity_index[path] = {
+                "title": title,
+                "category": category,
+                "category_title": _display_category_title(category),
+                "mention_count": int(entity.get("mention_count", 0)),
+                "issue_count": issue_count,
+                "standalone": False,
+            }
+            entity_source_refs[path] = []
+            continue
         path = entity_note_paths[idx]
         category = entity["category"]
         title = entity["name"]
@@ -1143,9 +1204,9 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
         )[:12]:
             related_entity = entities[related_id]
             related_lines.append(
-                f"- {_wikilink(entity_note_paths[related_id], related_entity['name'])} ({count} shared issues)"
+                f"- {_wikilink(entity_reference_paths[related_id], related_entity['name'])} ({count} shared issues)"
             )
-            links_to.add(entity_note_paths[related_id])
+            links_to.add(entity_note_targets[related_id])
 
         external_links = _render_external_link_lines(entity)
 
@@ -1208,6 +1269,7 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
             "category_title": _display_category_title(category),
             "mention_count": int(entity.get("mention_count", 0)),
             "issue_count": issue_count,
+            "standalone": True,
         }
         entity_source_refs[path] = source_ref_records
 
@@ -1241,9 +1303,9 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
     for entity_id in top_entities:
         entity = entities[entity_id]
         top_lines.append(
-            f"- {_wikilink(entity_note_paths[entity_id], entity['name'])} ({entity.get('mention_count', 0)} mentions, {_display_category_title(entity['category'])})"
+            f"- {_wikilink(entity_reference_paths[entity_id], entity['name'])} ({entity.get('mention_count', 0)} mentions, {_display_category_title(entity['category'])})"
         )
-        top_links.add(entity_note_paths[entity_id])
+        top_links.add(entity_note_targets[entity_id])
     notes[index_paths["top-mentioned"]] = Note(
         path=index_paths["top-mentioned"],
         title="Most Mentioned Entities",
@@ -1293,7 +1355,7 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
                 entity_ids,
                 entities=entities,
                 category_paths=category_paths,
-                entity_note_paths=entity_note_paths,
+                entity_note_paths=entity_reference_paths,
             )
         else:
             full_body = list(note.body)
@@ -1320,8 +1382,8 @@ def build_obsidian_vault(run_dir: Path, vault_dir: Path) -> dict[str, Any]:
     (meta_dir / "related-entity-map.json").write_text(
         json.dumps(
             {
-                entity_note_paths[idx]: [
-                    {"path": entity_note_paths[related_id], "shared_issues": count}
+                entity_reference_paths[idx]: [
+                    {"path": entity_reference_paths[related_id], "shared_issues": count}
                     for related_id, count in sorted(
                         related_counts[idx].items(),
                         key=lambda item: (-item[1], entities[item[0]]["name"].lower()),
