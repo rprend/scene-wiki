@@ -192,6 +192,33 @@ function deriveTitleFromHost(hostname) {
     .join(" ")
 }
 
+function normalizePublicationTitle(title) {
+  const decoded = title
+    .replace(/&#8211;/g, "–")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+  const clean = normalizeWhitespace(decoded)
+  if (!clean) return clean
+  if (clean.includes(" | ")) {
+    const parts = clean.split(" | ").map((part) => part.trim()).filter(Boolean)
+    if (parts.length >= 2) return parts[parts.length - 1]
+  }
+  if (clean.includes(" – ")) {
+    const parts = clean.split(" – ").map((part) => part.trim()).filter(Boolean)
+    if (parts.length >= 2 && ["episodes", "posts", "archive", "blog"].includes(parts[0].toLowerCase())) {
+      return parts[parts.length - 1]
+    }
+  }
+  if (clean.includes(" - ")) {
+    const parts = clean.split(" - ").map((part) => part.trim()).filter(Boolean)
+    if (parts.length >= 2 && ["episodes", "posts", "archive", "blog"].includes(parts[0].toLowerCase())) {
+      return parts[parts.length - 1]
+    }
+  }
+  return clean
+}
+
 async function detectSubstackSite(hostname) {
   const archiveUrl = `https://${hostname}/api/v1/archive?sort=new&search=&offset=0&limit=1`
 
@@ -244,6 +271,128 @@ async function detectSubstackSite(hostname) {
   return { isSubstack: false, title: null }
 }
 
+async function fetchHtml(url) {
+  const response = await fetch(url, {
+    headers: {
+      accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "user-agent": "SceneWikiBot/1.0 (+https://scenewiki.net)",
+    },
+  })
+  if (!response.ok) {
+    throw new HttpError(400, `Could not fetch ${url}.`)
+  }
+  return await response.text()
+}
+
+function extractFeedCandidates(sourceUrl, html) {
+  const candidates = []
+  const relRegex = /<link[^>]+rel=["'][^"']*alternate[^"']*["'][^>]+type=["'][^"']*(rss|atom|xml)[^"']*["'][^>]+href=["']([^"']+)["'][^>]*>/gi
+  for (const match of html.matchAll(relRegex)) {
+    try {
+      candidates.push(new URL(match[2], sourceUrl).toString())
+    } catch {}
+  }
+
+  const parsed = new URL(sourceUrl)
+  const path = parsed.pathname.replace(/\/+$/, "")
+  if (path) {
+    candidates.push(new URL(`${path}/feed/`, `${parsed.protocol}//${parsed.host}`).toString())
+  }
+  candidates.push(new URL("feed/", sourceUrl).toString())
+  candidates.push(new URL("/feed/", `${parsed.protocol}//${parsed.host}`).toString())
+
+  const seen = new Set()
+  return candidates.filter((candidate) => {
+    if (seen.has(candidate)) return false
+    seen.add(candidate)
+    return true
+  })
+}
+
+function parseFeed(xmlText) {
+  const titleMatch = xmlText.match(/<channel>[\s\S]*?<title>([\s\S]*?)<\/title>/i)
+  const items = [...xmlText.matchAll(/<item>[\s\S]*?<link>([\s\S]*?)<\/link>[\s\S]*?(?:<title>([\s\S]*?)<\/title>)?[\s\S]*?<\/item>/gi)].map(
+    (match) => ({
+      link: normalizeWhitespace(match[1].replace(/<!\[CDATA\[|\]\]>/g, "")),
+      title: normalizeWhitespace((match[2] || "").replace(/<!\[CDATA\[|\]\]>/g, "")),
+    }),
+  )
+  return {
+    title: titleMatch ? normalizePublicationTitle(titleMatch[1].replace(/<!\[CDATA\[|\]\]>/g, "")) : null,
+    items: items.filter((item) => item.link),
+  }
+}
+
+function extractArchiveLinks(sourceUrl, html) {
+  const parsed = new URL(sourceUrl)
+  const sourcePath = parsed.pathname.replace(/\/+$/, "")
+  const linkRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>/gi
+  const links = new Set()
+  for (const match of html.matchAll(linkRegex)) {
+    try {
+      const absolute = new URL(match[1], sourceUrl)
+      if (absolute.host !== parsed.host) continue
+      const path = absolute.pathname.replace(/\/+$/, "")
+      if (!path || !path.startsWith(`${sourcePath}/`)) continue
+      if (path.endsWith("/feed")) continue
+      const suffix = path.slice(sourcePath.length + 1)
+      if (!suffix || suffix.includes("/")) continue
+      links.add(absolute.toString())
+    } catch {}
+  }
+  return [...links]
+}
+
+async function detectGenericPublication(sourceUrl) {
+  try {
+    const html = await fetchHtml(sourceUrl)
+    const titleMatch = html.match(/<title>([^<]+)<\/title>/i)
+    const pageTitle = titleMatch ? normalizePublicationTitle(titleMatch[1]) : null
+
+    let bestFeed = null
+    for (const candidate of extractFeedCandidates(sourceUrl, html)) {
+      try {
+        const response = await fetch(candidate, {
+          headers: {
+            accept: "application/rss+xml,application/atom+xml,application/xml,text/xml",
+            "user-agent": "SceneWikiBot/1.0 (+https://scenewiki.net)",
+          },
+        })
+        if (!response.ok) continue
+        const parsed = parseFeed(await response.text())
+        if (parsed.items.length > (bestFeed?.items.length || 0)) {
+          bestFeed = { ...parsed, url: candidate }
+        }
+      } catch {}
+    }
+
+    const archiveLinks = extractArchiveLinks(sourceUrl, html)
+    const sampleUrl = bestFeed?.items?.[0]?.link || archiveLinks[0]
+    if (!sampleUrl) {
+      return { isGenericPublication: false, title: null }
+    }
+
+    const sampleHtml = await fetchHtml(sampleUrl)
+    const sampleText = normalizeWhitespace(
+      sampleHtml
+        .replace(/<script[\s\S]*?<\/script>/gi, " ")
+        .replace(/<style[\s\S]*?<\/style>/gi, " ")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/&nbsp;/g, " "),
+    )
+    if (sampleText.length < 1200) {
+      return { isGenericPublication: false, title: null }
+    }
+
+    return {
+      isGenericPublication: true,
+      title: normalizePublicationTitle(bestFeed?.title || pageTitle || deriveTitleFromHost(new URL(sourceUrl).hostname)),
+    }
+  } catch {
+    return { isGenericPublication: false, title: null }
+  }
+}
+
 async function resolveSourceUrl(rawUrl) {
   let parsed
   try {
@@ -266,14 +415,24 @@ async function resolveSourceUrl(rawUrl) {
   }
 
   const detection = await detectSubstackSite(hostname)
-  if (!detection.isSubstack) {
-    throw new HttpError(400, "v1 only supports Substack publication roots.")
+  if (detection.isSubstack) {
+    return {
+      sourceUrl: `https://${hostname}`,
+      sourceType: "substack",
+      title: detection.title || deriveTitleFromHost(hostname),
+    }
+  }
+
+  const normalizedUrl = `${parsed.protocol}//${hostname}${parsed.pathname.replace(/\/+$/, "") || "/"}`
+  const genericDetection = await detectGenericPublication(normalizedUrl)
+  if (!genericDetection.isGenericPublication) {
+    throw new HttpError(400, "Could not find a parseable publication archive, feed, or readable sample post at that URL.")
   }
 
   return {
-    sourceUrl: `https://${hostname}`,
-    sourceType: "substack",
-    title: detection.title || deriveTitleFromHost(hostname),
+    sourceUrl: normalizedUrl,
+    sourceType: "generic-publication",
+    title: genericDetection.title || deriveTitleFromHost(hostname),
   }
 }
 

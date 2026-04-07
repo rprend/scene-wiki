@@ -553,9 +553,10 @@ def run_scene_wiki_build(job: dict, workdir: Path, custom_domain: str, log_path:
                 f"Ignoring invalid saved run dir {run_dir_value!r}; expected metadata.json and normalized/.",
                 flush=True,
             )
+        build_command = "build-substack" if job.get("sourceType") == "substack" else "build-publication"
         command = [
             "scene-wiki",
-            "build-substack",
+            build_command,
             job["sourceUrl"],
             "--subject",
             title,
