@@ -314,6 +314,24 @@ class BuildProgressTracker:
             self.start_stage(stage, message, overall_progress_pct=progress)
             return
 
+        if text.startswith("Prepared wiki content tree: "):
+            self.emit(
+                "Prepared wiki content tree.",
+                stage="site-content",
+                overall_progress_pct=84,
+                payload={"details": text.replace("Prepared wiki content tree: ", "", 1)},
+            )
+            return
+
+        if text.startswith("Quartz build config: "):
+            self.emit(
+                "Quartz build configuration ready.",
+                stage="quartz",
+                overall_progress_pct=87,
+                payload={"details": text.replace("Quartz build config: ", "", 1)},
+            )
+            return
+
         if text.startswith("Site build complete: "):
             output_dir = text.replace("Site build complete: ", "", 1)
             self.emit(

@@ -19,12 +19,30 @@ def _quartz_build_env() -> dict[str, str]:
     return env
 
 
+def _count_files(path: Path, suffix: str | None = None) -> int:
+    if not path.exists():
+        return 0
+    if suffix is None:
+        return sum(1 for child in path.rglob("*") if child.is_file())
+    return sum(1 for child in path.rglob(f"*{suffix}") if child.is_file())
+
+
 def build_quartz_site(
     wiki_dir: Path,
     output_dir: Path,
     *,
     concurrency: int = 3,
 ) -> None:
+    env = _quartz_build_env()
+    content_dir = wiki_dir / "content"
+    markdown_files = _count_files(content_dir, ".md")
+    total_files = _count_files(content_dir)
+    print(
+        "Quartz build config: "
+        f"contentDir={content_dir} markdownFiles={markdown_files} totalFiles={total_files} "
+        f"concurrency={concurrency} nodeOptions={env.get('NODE_OPTIONS', '')}",
+        flush=True,
+    )
     subprocess.run(
         [
             "node",
@@ -39,7 +57,7 @@ def build_quartz_site(
         ],
         cwd=wiki_dir,
         check=True,
-        env=_quartz_build_env(),
+        env=env,
     )
 
 
@@ -61,6 +79,12 @@ def build_full_site(
 ) -> dict[str, Any]:
     print("Preparing wiki content", flush=True)
     build_scene_wiki(run_dir=run_dir, site_dir=wiki_dir, vault_dir=vault_dir)
+    content_dir = wiki_dir / "content"
+    print(
+        "Prepared wiki content tree: "
+        f"contentDir={content_dir} markdownFiles={_count_files(content_dir, '.md')} totalFiles={_count_files(content_dir)}",
+        flush=True,
+    )
     print("Building Quartz site", flush=True)
     build_quartz_site(wiki_dir=wiki_dir, output_dir=output_dir, concurrency=quartz_concurrency)
     print("Building search assets", flush=True)
