@@ -16,7 +16,7 @@ kill_timeout = "5m"
   SCENE_WIKI_DATA_ROOT = "/data/scene-wiki-data"
   SCENE_WIKI_CHECKPOINT_DIR = "/data/archive-checkpoints"
   SCENE_WIKI_QUARTZ_CONCURRENCY = "1"
-  SCENE_WIKI_NODE_MAX_OLD_SPACE_MB = "6144"
+  SCENE_WIKI_NODE_MAX_OLD_SPACE_MB = "12288"
   RUNNER_WORKDIR = "/app"
   RUNNER_LOG_ROOT = "/data/logs"
 
@@ -25,7 +25,7 @@ kill_timeout = "5m"
 
 [[vm]]
   cpus = 1
-  memory = "8gb"
+  memory = "16gb"
   cpu_kind = "performance"
 
 [[mounts]]
