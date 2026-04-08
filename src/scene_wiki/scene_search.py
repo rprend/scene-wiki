@@ -39,7 +39,7 @@ MAX_CHUNK_ENTITIES = 8
 MAX_ENTITY_BACKLINKS = 6
 MAX_ENTITY_CONTEXTS = 6
 MAX_EMBED_RETRIES = 6
-SEARCH_INDEX_SHARD_TARGET_BYTES = 20 * 1024 * 1024
+SEARCH_INDEX_SHARD_TARGET_BYTES = 12 * 1024 * 1024
 
 
 def _google_api_key() -> str:
@@ -354,12 +354,12 @@ def build_scene_search_assets(run_dir: Path, output_dir: Path) -> dict[str, Any]
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "scene-search-index.json").write_text(
-        json.dumps(search_index, indent=2, ensure_ascii=False),
+        json.dumps(search_index, ensure_ascii=False, separators=(",", ":")),
         encoding="utf-8",
     )
     for index, shard in enumerate(chunk_shards):
         (output_dir / f"scene-search-chunks-{index:03d}.json").write_text(
-            json.dumps({"chunks": shard}, indent=2, ensure_ascii=False),
+            json.dumps({"chunks": shard}, ensure_ascii=False, separators=(",", ":")),
             encoding="utf-8",
         )
 
