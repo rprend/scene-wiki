@@ -36,10 +36,12 @@ type SearchIndex = {
     model: string
     dimensions: number
     query_task_type: string
+    search_index_version?: number
   }
   entities: Record<string, SearchEntity>
   issues: Record<string, { title: string; published_at?: string; published_at_human?: string; url?: string }>
-  chunks: SearchChunk[]
+  chunks?: SearchChunk[]
+  chunk_shards?: Array<{ path: string; chunk_count: number }>
 }
 
 type Env = {
@@ -55,6 +57,7 @@ const MAX_CONTEXT_ENTITIES = 4
 const MAX_RELATED_PAGES = 12
 
 let indexPromise: Promise<SearchIndex> | undefined
+const chunkShardPromises = new Map<string, Promise<SearchChunk[]>>()
 
 function getApiKey(env: Env): string {
   const apiKey = env.GOOGLE_API_KEY || env.GEMINI_API_KEY
@@ -76,6 +79,29 @@ async function getIndex(env: Env, request: Request): Promise<SearchIndex> {
     )
   }
   return await indexPromise
+}
+
+async function getChunkShard(
+  env: Env,
+  request: Request,
+  path: string,
+): Promise<SearchChunk[]> {
+  const cached = chunkShardPromises.get(path)
+  if (cached) {
+    return await cached
+  }
+
+  const promise = env.ASSETS.fetch(new URL(`/${path.replace(/^\/+/, "")}`, request.url)).then(
+    async (response: Response) => {
+      if (!response.ok) {
+        throw new Error(`Search chunk shard unavailable (${response.status}) for ${path}`)
+      }
+      const payload = (await response.json()) as { chunks?: SearchChunk[] }
+      return Array.isArray(payload.chunks) ? payload.chunks : []
+    },
+  )
+  chunkShardPromises.set(path, promise)
+  return await promise
 }
 
 function cosineSimilarity(a: number[], b: number[]): number {
@@ -229,6 +255,31 @@ function buildEntityCards(index: SearchIndex, chunk: SearchChunk): Array<SearchE
     .filter((entity): entity is SearchEntity & { path: string } => entity !== null)
 }
 
+function scoreChunk(index: SearchIndex, queryEmbedding: number[], chunk: SearchChunk) {
+  const entityCards = buildEntityCards(index, chunk)
+  return {
+    id: chunk.chunk_id,
+    text: buildChunkText(chunk, entityCards),
+    score: cosineSimilarity(queryEmbedding, chunk.embedding),
+    metadata: {
+      issuePath: chunk.issue_path,
+      issueTitle: chunk.issue_title,
+      publishedAt: chunk.published_at,
+      publishedAtHuman: chunk.published_at_human,
+      sourceUrl: chunk.source_url,
+      primaryText: chunk.primary_text,
+      entityCards,
+      relatedPages: buildRelatedPages(chunk.issue_path, chunk.issue_title, entityCards),
+    },
+  }
+}
+
+function mergeTopResults<T extends { score: number }>(left: T[], right: T[], topK: number): T[] {
+  return [...left, ...right]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topK)
+}
+
 export default {
   async fetch(request: Request, env: Env) {
     const url = new URL(request.url)
@@ -249,28 +300,20 @@ export default {
       search: async (query: string, { topK }: { topK: number }) => {
         const index = await getIndex(env, request)
         const queryEmbedding = await embedQuery(query, env, index)
+        if (Array.isArray(index.chunks)) {
+          return index.chunks
+            .map((chunk) => scoreChunk(index, queryEmbedding, chunk))
+            .sort((left, right) => right.score - left.score)
+            .slice(0, topK)
+        }
 
-        return index.chunks
-          .map((chunk) => {
-            const entityCards = buildEntityCards(index, chunk)
-            return {
-              id: chunk.chunk_id,
-              text: buildChunkText(chunk, entityCards),
-              score: cosineSimilarity(queryEmbedding, chunk.embedding),
-              metadata: {
-                issuePath: chunk.issue_path,
-                issueTitle: chunk.issue_title,
-                publishedAt: chunk.published_at,
-                publishedAtHuman: chunk.published_at_human,
-                sourceUrl: chunk.source_url,
-                primaryText: chunk.primary_text,
-                entityCards,
-                relatedPages: buildRelatedPages(chunk.issue_path, chunk.issue_title, entityCards),
-              },
-            }
-          })
-          .sort((left, right) => right.score - left.score)
-          .slice(0, topK)
+        let topResults: Array<ReturnType<typeof scoreChunk>> = []
+        for (const shard of index.chunk_shards ?? []) {
+          const chunks = await getChunkShard(env, request, shard.path)
+          const scored = chunks.map((chunk) => scoreChunk(index, queryEmbedding, chunk))
+          topResults = mergeTopResults(topResults, scored, topK)
+        }
+        return topResults
       },
     })
 

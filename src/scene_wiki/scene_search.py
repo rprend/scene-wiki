@@ -39,6 +39,7 @@ MAX_CHUNK_ENTITIES = 8
 MAX_ENTITY_BACKLINKS = 6
 MAX_ENTITY_CONTEXTS = 6
 MAX_EMBED_RETRIES = 6
+SEARCH_INDEX_SHARD_TARGET_BYTES = 20 * 1024 * 1024
 
 
 def _google_api_key() -> str:
@@ -206,6 +207,31 @@ def _category_path(category: str) -> str:
     return f"categories/{category}"
 
 
+def _json_size_bytes(value: Any) -> int:
+    return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+
+def _split_chunk_shards(chunks: list[dict[str, Any]], *, target_bytes: int) -> list[list[dict[str, Any]]]:
+    shards: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    current_bytes = 2  # []
+
+    for chunk in chunks:
+        chunk_bytes = _json_size_bytes(chunk)
+        projected = current_bytes + chunk_bytes + (1 if current else 0)
+        if current and projected > target_bytes:
+            shards.append(current)
+            current = [chunk]
+            current_bytes = 2 + chunk_bytes
+            continue
+        current.append(chunk)
+        current_bytes = projected
+
+    if current:
+        shards.append(current)
+    return shards
+
+
 def build_scene_search_assets(run_dir: Path, output_dir: Path) -> dict[str, Any]:
     run_dir = run_dir.resolve()
     output_dir = output_dir.resolve()
@@ -296,6 +322,7 @@ def build_scene_search_assets(run_dir: Path, output_dir: Path) -> dict[str, Any]
             ],
         }
 
+    chunk_shards = _split_chunk_shards(chunks, target_bytes=SEARCH_INDEX_SHARD_TARGET_BYTES)
     search_index = {
         "meta": {
             "model": EMBEDDING_MODEL,
@@ -304,6 +331,7 @@ def build_scene_search_assets(run_dir: Path, output_dir: Path) -> dict[str, Any]
             "query_task_type": QUERY_TASK_TYPE,
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "chunk_count": len(chunks),
+            "search_index_version": 2,
         },
         "entities": entity_payload,
         "issues": {
@@ -315,7 +343,13 @@ def build_scene_search_assets(run_dir: Path, output_dir: Path) -> dict[str, Any]
             }
             for doc_id, doc in docs.items()
         },
-        "chunks": chunks,
+        "chunk_shards": [
+            {
+                "path": f"scene-search-chunks-{index:03d}.json",
+                "chunk_count": len(shard),
+            }
+            for index, shard in enumerate(chunk_shards)
+        ],
     }
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -323,9 +357,15 @@ def build_scene_search_assets(run_dir: Path, output_dir: Path) -> dict[str, Any]
         json.dumps(search_index, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
+    for index, shard in enumerate(chunk_shards):
+        (output_dir / f"scene-search-chunks-{index:03d}.json").write_text(
+            json.dumps({"chunks": shard}, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
 
     return {
         "output_dir": str(output_dir),
         "chunk_count": len(chunks),
+        "chunk_shard_count": len(chunk_shards),
         "embedding_model": EMBEDDING_MODEL,
     }
