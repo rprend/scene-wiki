@@ -38,8 +38,10 @@ type SearchIndex = {
     query_task_type: string
     search_index_version?: number
   }
-  entities: Record<string, SearchEntity>
-  issues: Record<string, { title: string; published_at?: string; published_at_human?: string; url?: string }>
+  entities?: Record<string, SearchEntity>
+  entities_path?: string
+  issues?: Record<string, { title: string; published_at?: string; published_at_human?: string; url?: string }>
+  issues_path?: string
   chunks?: SearchChunk[]
   chunk_shards?: Array<{ path: string; chunk_count: number }>
 }
@@ -58,6 +60,7 @@ const MAX_RELATED_PAGES = 12
 
 let indexPromise: Promise<SearchIndex> | undefined
 const chunkShardPromises = new Map<string, Promise<SearchChunk[]>>()
+let entitiesPromise: Promise<Record<string, SearchEntity>> | undefined
 
 function getApiKey(env: Env): string {
   const apiKey = env.GOOGLE_API_KEY || env.GEMINI_API_KEY
@@ -102,6 +105,27 @@ async function getChunkShard(
   )
   chunkShardPromises.set(path, promise)
   return await promise
+}
+
+async function getEntities(env: Env, request: Request, index: SearchIndex): Promise<Record<string, SearchEntity>> {
+  if (index.entities) {
+    return index.entities
+  }
+  if (!index.entities_path) {
+    return {}
+  }
+  if (!entitiesPromise) {
+    entitiesPromise = env.ASSETS.fetch(new URL(`/${index.entities_path.replace(/^\/+/, "")}`, request.url)).then(
+      async (response: Response) => {
+        if (!response.ok) {
+          throw new Error(`Search entities unavailable (${response.status})`)
+        }
+        const payload = (await response.json()) as { entities?: Record<string, SearchEntity> }
+        return payload.entities ?? {}
+      },
+    )
+  }
+  return await entitiesPromise
 }
 
 function cosineSimilarity(a: number[], b: number[]): number {
@@ -245,18 +269,18 @@ function buildChunkText(chunk: SearchChunk, entityCards: Array<SearchEntity & { 
   return lines.join("\n").trim()
 }
 
-function buildEntityCards(index: SearchIndex, chunk: SearchChunk): Array<SearchEntity & { path: string }> {
+function buildEntityCards(entities: Record<string, SearchEntity>, chunk: SearchChunk): Array<SearchEntity & { path: string }> {
   return chunk.entity_paths
     .slice(0, MAX_CONTEXT_ENTITIES)
     .map((path) => {
-      const entity = index.entities[path]
+      const entity = entities[path]
       return entity ? { path, ...entity } : null
     })
     .filter((entity): entity is SearchEntity & { path: string } => entity !== null)
 }
 
-function scoreChunk(index: SearchIndex, queryEmbedding: number[], chunk: SearchChunk) {
-  const entityCards = buildEntityCards(index, chunk)
+function scoreChunk(entities: Record<string, SearchEntity>, queryEmbedding: number[], chunk: SearchChunk) {
+  const entityCards = buildEntityCards(entities, chunk)
   return {
     id: chunk.chunk_id,
     text: buildChunkText(chunk, entityCards),
@@ -299,10 +323,11 @@ export default {
         "You are analyzing a Substack scene archive. Always use deep_search first. Answer in clean markdown with short sections and bullets. Every important claim must be grounded with a short verbatim quotation from the retrieved primary text using blockquote syntax. Include markdown links to the relevant issue pages, entity/article pages, and original source URLs whenever they are present in the retrieved context. Prefer concise synthesis over repetition, but preserve concrete source wording in the quotations. Do not invent links or citations.",
       search: async (query: string, { topK }: { topK: number }) => {
         const index = await getIndex(env, request)
+        const entities = await getEntities(env, request, index)
         const queryEmbedding = await embedQuery(query, env, index)
         if (Array.isArray(index.chunks)) {
           return index.chunks
-            .map((chunk) => scoreChunk(index, queryEmbedding, chunk))
+            .map((chunk) => scoreChunk(entities, queryEmbedding, chunk))
             .sort((left, right) => right.score - left.score)
             .slice(0, topK)
         }
@@ -310,7 +335,7 @@ export default {
         let topResults: Array<ReturnType<typeof scoreChunk>> = []
         for (const shard of index.chunk_shards ?? []) {
           const chunks = await getChunkShard(env, request, shard.path)
-          const scored = chunks.map((chunk) => scoreChunk(index, queryEmbedding, chunk))
+          const scored = chunks.map((chunk) => scoreChunk(entities, queryEmbedding, chunk))
           topResults = mergeTopResults(topResults, scored, topK)
         }
         return topResults

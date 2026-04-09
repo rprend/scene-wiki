@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import json
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,20 @@ def _count_files(path: Path, suffix: str | None = None) -> int:
     if suffix is None:
         return sum(1 for child in path.rglob("*") if child.is_file())
     return sum(1 for child in path.rglob(f"*{suffix}") if child.is_file())
+
+
+def _quartz_cache_marker(output_dir: Path) -> Path:
+    return output_dir / ".scene-wiki-quartz-ready.json"
+
+
+def _write_quartz_cache_marker(output_dir: Path, payload: dict[str, Any]) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    _quartz_cache_marker(output_dir).write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
+def _has_reusable_quartz_output(output_dir: Path) -> bool:
+    marker = _quartz_cache_marker(output_dir)
+    return marker.exists() and (output_dir / "index.html").exists()
 
 
 def build_quartz_site(
@@ -76,17 +91,30 @@ def build_full_site(
     output_dir: Path,
     vault_dir: Path,
     quartz_concurrency: int = 3,
+    reuse_quartz_output: bool = False,
 ) -> dict[str, Any]:
-    print("Preparing wiki content", flush=True)
-    build_scene_wiki(run_dir=run_dir, site_dir=wiki_dir, vault_dir=vault_dir)
-    content_dir = wiki_dir / "content"
-    print(
-        "Prepared wiki content tree: "
-        f"contentDir={content_dir} markdownFiles={_count_files(content_dir, '.md')} totalFiles={_count_files(content_dir)}",
-        flush=True,
-    )
-    print("Building Quartz site", flush=True)
-    build_quartz_site(wiki_dir=wiki_dir, output_dir=output_dir, concurrency=quartz_concurrency)
+    if reuse_quartz_output and _has_reusable_quartz_output(output_dir):
+        print("Reusing cached Quartz output", flush=True)
+    else:
+        print("Preparing wiki content", flush=True)
+        build_scene_wiki(run_dir=run_dir, site_dir=wiki_dir, vault_dir=vault_dir)
+        content_dir = wiki_dir / "content"
+        print(
+            "Prepared wiki content tree: "
+            f"contentDir={content_dir} markdownFiles={_count_files(content_dir, '.md')} totalFiles={_count_files(content_dir)}",
+            flush=True,
+        )
+        print("Building Quartz site", flush=True)
+        build_quartz_site(wiki_dir=wiki_dir, output_dir=output_dir, concurrency=quartz_concurrency)
+        _write_quartz_cache_marker(
+            output_dir,
+            {
+                "runDir": str(run_dir),
+                "vaultDir": str(vault_dir),
+                "wikiDir": str(wiki_dir),
+                "outputDir": str(output_dir),
+            },
+        )
     print("Building search assets", flush=True)
     build_scene_search_assets(run_dir=run_dir, output_dir=output_dir)
     print("Bundling frontend assets", flush=True)

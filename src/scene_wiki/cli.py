@@ -123,6 +123,7 @@ def build_run_command(
     quartz_concurrency: int = _default_quartz_concurrency(),
     site_title: Optional[str] = None,
     reset_extraction: bool = False,
+    reuse_quartz_output: bool = False,
 ) -> None:
     if site_title:
         import os
@@ -154,6 +155,7 @@ def build_run_command(
         output_dir=output_dir.resolve(),
         vault_dir=vault_dir.resolve(),
         quartz_concurrency=quartz_concurrency,
+        reuse_quartz_output=reuse_quartz_output,
     )
     typer.echo(f"Site build complete: {result['output_dir']}")
     typer.echo(result["output_dir"])

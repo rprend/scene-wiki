@@ -333,16 +333,8 @@ def build_scene_search_assets(run_dir: Path, output_dir: Path) -> dict[str, Any]
             "chunk_count": len(chunks),
             "search_index_version": 2,
         },
-        "entities": entity_payload,
-        "issues": {
-            issue_paths[doc_id]: {
-                "title": doc.get("title", doc_id),
-                "published_at": doc.get("published_at"),
-                "published_at_human": _human_date(doc.get("published_at")),
-                "url": doc.get("url"),
-            }
-            for doc_id, doc in docs.items()
-        },
+        "entities_path": "scene-search-entities.json",
+        "issues_path": "scene-search-issues.json",
         "chunk_shards": [
             {
                 "path": f"scene-search-chunks-{index:03d}.json",
@@ -355,6 +347,28 @@ def build_scene_search_assets(run_dir: Path, output_dir: Path) -> dict[str, Any]
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "scene-search-index.json").write_text(
         json.dumps(search_index, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    (output_dir / "scene-search-entities.json").write_text(
+        json.dumps({"entities": entity_payload}, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    (output_dir / "scene-search-issues.json").write_text(
+        json.dumps(
+            {
+                "issues": {
+                    issue_paths[doc_id]: {
+                        "title": doc.get("title", doc_id),
+                        "published_at": doc.get("published_at"),
+                        "published_at_human": _human_date(doc.get("published_at")),
+                        "url": doc.get("url"),
+                    }
+                    for doc_id, doc in docs.items()
+                }
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
         encoding="utf-8",
     )
     for index, shard in enumerate(chunk_shards):

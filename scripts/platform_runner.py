@@ -542,11 +542,12 @@ def add_custom_domain(project_name: str, domain_name: str) -> None:
 
 def run_scene_wiki_build(job: dict, workdir: Path, custom_domain: str, log_path: Path, base_url: str) -> tuple[Path, str | None]:
     title = job.get("title") or job["siteSlug"].replace("-", " ").title()
-    output_dir = workdir / "dist" / "generated" / job["siteSlug"]
-    vault_dir = workdir / "vault" / job["siteSlug"]
     run_dir_value = (job.get("runDir") or "").strip()
     if run_dir_value and looks_like_saved_run_dir(Path(run_dir_value)):
         run_dir = Path(run_dir_value)
+        site_cache_root = run_dir / "artifacts" / "site-build-cache" / job["siteSlug"]
+        output_dir = site_cache_root / "output"
+        vault_dir = site_cache_root / "vault"
         command = [
             "scene-wiki",
             "build-run",
@@ -558,6 +559,7 @@ def run_scene_wiki_build(job: dict, workdir: Path, custom_domain: str, log_path:
             str(output_dir),
             "--wiki-dir",
             str(workdir / "wiki"),
+            "--reuse-quartz-output",
         ]
         log_event(
             base_url,
@@ -566,6 +568,8 @@ def run_scene_wiki_build(job: dict, workdir: Path, custom_domain: str, log_path:
             payload={"runDir": str(run_dir)},
         )
     else:
+        output_dir = workdir / "dist" / "generated" / job["siteSlug"]
+        vault_dir = workdir / "vault" / job["siteSlug"]
         if run_dir_value:
             print(
                 f"Ignoring invalid saved run dir {run_dir_value!r}; expected metadata.json and normalized/.",
