@@ -5,6 +5,7 @@ const JSON_HEADERS = {
 
 const PUBLIC_SITE_STATUSES = new Set(["deployed"])
 const ACTIVE_JOB_STATUSES = new Set(["queued", "running"])
+const STALE_RUNNING_JOB_MS = 15 * 60 * 1000
 
 export default {
   async fetch(request, env, ctx) {
@@ -106,6 +107,12 @@ function jsonError(message, status = 400) {
 
 function nowIso() {
   return new Date().toISOString()
+}
+
+function parseIsoMillis(value) {
+  if (!value || typeof value !== "string") return null
+  const millis = Date.parse(value)
+  return Number.isFinite(millis) ? millis : null
 }
 
 function normalizeWhitespace(value) {
@@ -699,7 +706,22 @@ async function handleCreateJob(request, env) {
     .first()
 
   if (existingActiveJob) {
-    return jsonResponse({ duplicate: true, job: mapJobRecord(existingActiveJob) })
+    const heartbeatMillis = parseIsoMillis(existingActiveJob.heartbeat_at)
+    const isStaleRunning =
+      existingActiveJob.status === "running"
+      && heartbeatMillis !== null
+      && Date.now() - heartbeatMillis > STALE_RUNNING_JOB_MS
+    if (isStaleRunning) {
+      await failJobRecord(
+        env,
+        existingActiveJob.id,
+        "Marked failed after stale running job timed out without heartbeat.",
+        existingActiveJob.run_dir || null,
+        null,
+      )
+    } else {
+      return jsonResponse({ duplicate: true, job: mapJobRecord(existingActiveJob) })
+    }
   }
 
   const previousJobWithRunDir = await env.SCENE_WIKI_DB.prepare(
@@ -767,6 +789,8 @@ async function handleCreateJob(request, env) {
 }
 
 async function handleClaimNextJob(env) {
+  await reapStaleRunningJobs(env)
+
   const queued = await env.SCENE_WIKI_DB.prepare(
     `SELECT id, site_slug, source_url, source_type
      FROM jobs
@@ -879,11 +903,8 @@ async function handleCompleteJob(request, env, jobId) {
   return jsonResponse({ ok: true })
 }
 
-async function handleFailJob(request, env, jobId) {
-  const body = await parseJson(request)
+async function failJobRecord(env, jobId, errorMessage, runDir, payload) {
   const timestamp = nowIso()
-  const errorMessage = typeof body.errorMessage === "string" ? body.errorMessage : "Job failed."
-  const runDir = typeof body.runDir === "string" ? body.runDir : null
   const siteSlug = await env.SCENE_WIKI_DB.prepare(`SELECT site_slug FROM jobs WHERE id = ?`).bind(jobId).first()
   if (!siteSlug) {
     throw new HttpError(404, "Job not found.")
@@ -901,6 +922,36 @@ async function handleFailJob(request, env, jobId) {
        WHERE slug = ?`,
     ).bind(jobId, errorMessage, timestamp, siteSlug.site_slug),
   ])
-  await appendEvent(env, jobId, "error", errorMessage, body.payload || null)
+  await appendEvent(env, jobId, "error", errorMessage, payload || null)
+}
+
+async function reapStaleRunningJobs(env) {
+  const cutoffIso = new Date(Date.now() - STALE_RUNNING_JOB_MS).toISOString()
+  const { results } = await env.SCENE_WIKI_DB.prepare(
+    `SELECT id, run_dir
+     FROM jobs
+     WHERE status = 'running'
+       AND heartbeat_at IS NOT NULL
+       AND heartbeat_at < ?`,
+  )
+    .bind(cutoffIso)
+    .all()
+
+  for (const row of results) {
+    await failJobRecord(
+      env,
+      row.id,
+      "Marked failed after stale running job timed out without heartbeat.",
+      row.run_dir || null,
+      { staleHeartbeatCutoff: cutoffIso },
+    )
+  }
+}
+
+async function handleFailJob(request, env, jobId) {
+  const body = await parseJson(request)
+  const errorMessage = typeof body.errorMessage === "string" ? body.errorMessage : "Job failed."
+  const runDir = typeof body.runDir === "string" ? body.runDir : null
+  await failJobRecord(env, jobId, errorMessage, runDir, body.payload || null)
   return jsonResponse({ ok: true })
 }
