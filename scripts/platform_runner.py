@@ -5,6 +5,7 @@ import json
 import os
 import queue
 import re
+import signal
 import socket
 import subprocess
 import sys
@@ -17,6 +18,7 @@ from pathlib import Path
 
 
 DEFAULT_API_TIMEOUT_SECONDS = 60
+ACTIVE_JOB_CONTEXT: dict[str, object] = {}
 
 
 def load_env_file(path: Path) -> None:
@@ -72,9 +74,67 @@ def build_log_path(workdir: Path, job_id: str) -> Path:
     return log_dir / f"{job_id}.log"
 
 
+def set_active_job_context(
+    *,
+    base_url: str,
+    job_id: str,
+    log_path: Path,
+    run_dir: str | None = None,
+) -> None:
+    ACTIVE_JOB_CONTEXT.clear()
+    ACTIVE_JOB_CONTEXT.update(
+        {
+            "base_url": base_url,
+            "job_id": job_id,
+            "log_path": log_path,
+            "run_dir": run_dir,
+        }
+    )
+
+
+def clear_active_job_context() -> None:
+    ACTIVE_JOB_CONTEXT.clear()
+
+
 def append_log(log_path: Path, message: str) -> None:
     with log_path.open("a", encoding="utf-8") as handle:
         handle.write(message)
+
+
+def handle_shutdown_signal(signum: int, _frame) -> None:  # noqa: ANN001
+    signal_name = signal.Signals(signum).name
+    context = dict(ACTIVE_JOB_CONTEXT)
+    if context:
+        log_path = context.get("log_path")
+        if isinstance(log_path, Path):
+            try:
+                append_log(log_path, f"\nRunner received {signal_name}; failing active job.\n")
+            except Exception:  # noqa: BLE001
+                pass
+        base_url = context.get("base_url")
+        job_id = context.get("job_id")
+        run_dir = context.get("run_dir")
+        if isinstance(base_url, str) and isinstance(job_id, str):
+            try:
+                log_event(
+                    base_url,
+                    job_id,
+                    f"Runner interrupted by {signal_name}.",
+                    level="error",
+                    payload={"signal": signal_name},
+                )
+                api_request(
+                    base_url,
+                    f"/api/runner/jobs/{job_id}/fail",
+                    method="POST",
+                    payload={
+                        "errorMessage": f"Runner interrupted by {signal_name}.",
+                        "runDir": run_dir,
+                    },
+                )
+            except Exception:  # noqa: BLE001
+                pass
+    raise SystemExit(128 + signum)
 
 
 def tail_log(log_path: Path, max_chars: int = 8000) -> str:
@@ -615,7 +675,9 @@ def handle_job(base_url: str, job: dict, workdir: Path) -> None:
     log_path = build_log_path(workdir, job["id"])
 
     try:
+        set_active_job_context(base_url=base_url, job_id=job["id"], log_path=log_path, run_dir=job.get("runDir"))
         append_log(log_path, f"Job {job['id']} for {job['sourceUrl']}\n")
+        append_log(log_path, f"Runner PID {os.getpid()} started job processing.\n")
         log_event(base_url, job["id"], "Runner log initialized.", payload={"logPath": str(log_path)})
         heartbeat(base_url, job["id"], "Starting scene wiki build.")
         log_event(base_url, job["id"], "Building static wiki output.", payload={"project_name": project_name})
@@ -673,6 +735,8 @@ def handle_job(base_url: str, job: dict, workdir: Path) -> None:
             payload={"errorMessage": str(exc), "runDir": actual_run_dir if 'actual_run_dir' in locals() else job.get("runDir")},
         )
         raise
+    finally:
+        clear_active_job_context()
 
 
 def main() -> None:
@@ -686,6 +750,8 @@ def main() -> None:
     load_env_file(Path(args.env_file))
     base_url = require_env("PLATFORM_BASE_URL")
     workdir = Path(args.workdir).resolve()
+    signal.signal(signal.SIGINT, handle_shutdown_signal)
+    signal.signal(signal.SIGTERM, handle_shutdown_signal)
 
     while True:
         payload = api_request(base_url, "/api/runner/claim-next", method="POST", payload={})
@@ -696,7 +762,12 @@ def main() -> None:
             time.sleep(args.poll_seconds)
             continue
 
-        handle_job(base_url, job, workdir)
+        try:
+            handle_job(base_url, job, workdir)
+        except SystemExit:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            print(f"Job {job.get('id')} failed in runner loop: {exc}", file=sys.stderr, flush=True)
         if args.once:
             return
 
