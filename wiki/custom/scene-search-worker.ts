@@ -40,6 +40,7 @@ type SearchIndex = {
   }
   entities?: Record<string, SearchEntity>
   entities_path?: string
+  entity_shards?: Array<{ path: string; entity_count: number }>
   issues?: Record<string, { title: string; published_at?: string; published_at_human?: string; url?: string }>
   issues_path?: string
   chunks?: SearchChunk[]
@@ -61,6 +62,7 @@ const MAX_RELATED_PAGES = 12
 let indexPromise: Promise<SearchIndex> | undefined
 const chunkShardPromises = new Map<string, Promise<SearchChunk[]>>()
 let entitiesPromise: Promise<Record<string, SearchEntity>> | undefined
+const entityShardPromises = new Map<string, Promise<Record<string, SearchEntity>>>()
 
 function getApiKey(env: Env): string {
   const apiKey = env.GOOGLE_API_KEY || env.GEMINI_API_KEY
@@ -111,19 +113,42 @@ async function getEntities(env: Env, request: Request, index: SearchIndex): Prom
   if (index.entities) {
     return index.entities
   }
-  if (!index.entities_path) {
+  if (!index.entities_path && !(index.entity_shards && index.entity_shards.length > 0)) {
     return {}
   }
   if (!entitiesPromise) {
-    entitiesPromise = env.ASSETS.fetch(new URL(`/${index.entities_path.replace(/^\/+/, "")}`, request.url)).then(
-      async (response: Response) => {
-        if (!response.ok) {
-          throw new Error(`Search entities unavailable (${response.status})`)
+    if (index.entities_path) {
+      entitiesPromise = env.ASSETS.fetch(new URL(`/${index.entities_path.replace(/^\/+/, "")}`, request.url)).then(
+        async (response: Response) => {
+          if (!response.ok) {
+            throw new Error(`Search entities unavailable (${response.status})`)
+          }
+          const payload = (await response.json()) as { entities?: Record<string, SearchEntity> }
+          return payload.entities ?? {}
+        },
+      )
+    } else {
+      entitiesPromise = (async () => {
+        const merged: Record<string, SearchEntity> = {}
+        for (const shard of index.entity_shards ?? []) {
+          let shardPromise = entityShardPromises.get(shard.path)
+          if (!shardPromise) {
+            shardPromise = env.ASSETS.fetch(new URL(`/${shard.path.replace(/^\/+/, "")}`, request.url)).then(
+              async (response: Response) => {
+                if (!response.ok) {
+                  throw new Error(`Search entity shard unavailable (${response.status}) for ${shard.path}`)
+                }
+                const payload = (await response.json()) as { entities?: Record<string, SearchEntity> }
+                return payload.entities ?? {}
+              },
+            )
+            entityShardPromises.set(shard.path, shardPromise)
+          }
+          Object.assign(merged, await shardPromise)
         }
-        const payload = (await response.json()) as { entities?: Record<string, SearchEntity> }
-        return payload.entities ?? {}
-      },
-    )
+        return merged
+      })()
+    }
   }
   return await entitiesPromise
 }

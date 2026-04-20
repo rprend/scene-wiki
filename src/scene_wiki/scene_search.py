@@ -301,6 +301,27 @@ def _split_chunk_shards(chunks: list[dict[str, Any]], *, target_bytes: int) -> l
     return shards
 
 
+def _split_mapping_shards(mapping: dict[str, Any], *, target_bytes: int) -> list[dict[str, Any]]:
+    shards: list[dict[str, Any]] = []
+    current: dict[str, Any] = {}
+    current_bytes = 2  # {}
+
+    for key, value in mapping.items():
+        item_bytes = _json_size_bytes({key: value})
+        projected = current_bytes + item_bytes + (1 if current else 0)
+        if current and projected > target_bytes:
+            shards.append(current)
+            current = {key: value}
+            current_bytes = 2 + item_bytes
+            continue
+        current[key] = value
+        current_bytes = projected
+
+    if current:
+        shards.append(current)
+    return shards
+
+
 def build_scene_search_assets(run_dir: Path, output_dir: Path) -> dict[str, Any]:
     run_dir = run_dir.resolve()
     output_dir = output_dir.resolve()
@@ -417,6 +438,7 @@ def build_scene_search_assets(run_dir: Path, output_dir: Path) -> dict[str, Any]
         }
 
     chunk_shards = _split_chunk_shards(chunks, target_bytes=SEARCH_INDEX_SHARD_TARGET_BYTES)
+    entity_shards = _split_mapping_shards(entity_payload, target_bytes=SEARCH_INDEX_SHARD_TARGET_BYTES)
     search_index = {
         "meta": {
             "model": EMBEDDING_MODEL,
@@ -427,7 +449,13 @@ def build_scene_search_assets(run_dir: Path, output_dir: Path) -> dict[str, Any]
             "chunk_count": len(chunks),
             "search_index_version": 2,
         },
-        "entities_path": "scene-search-entities.json",
+        "entity_shards": [
+            {
+                "path": f"scene-search-entities-{index:03d}.json",
+                "entity_count": len(shard),
+            }
+            for index, shard in enumerate(entity_shards)
+        ],
         "issues_path": "scene-search-issues.json",
         "chunk_shards": [
             {
@@ -443,10 +471,11 @@ def build_scene_search_assets(run_dir: Path, output_dir: Path) -> dict[str, Any]
         json.dumps(search_index, ensure_ascii=False, separators=(",", ":")),
         encoding="utf-8",
     )
-    (output_dir / "scene-search-entities.json").write_text(
-        json.dumps({"entities": entity_payload}, ensure_ascii=False, separators=(",", ":")),
-        encoding="utf-8",
-    )
+    for index, shard in enumerate(entity_shards):
+        (output_dir / f"scene-search-entities-{index:03d}.json").write_text(
+            json.dumps({"entities": shard}, ensure_ascii=False, separators=(",", ":")),
+            encoding="utf-8",
+        )
     (output_dir / "scene-search-issues.json").write_text(
         json.dumps(
             {
