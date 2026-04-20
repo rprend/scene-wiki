@@ -322,9 +322,23 @@ def _split_mapping_shards(mapping: dict[str, Any], *, target_bytes: int) -> list
     return shards
 
 
+def _clear_existing_search_assets(output_dir: Path) -> None:
+    for pattern in (
+        "scene-search-index.json",
+        "scene-search-issues.json",
+        "scene-search-entities.json",
+        "scene-search-entities-*.json",
+        "scene-search-chunks-*.json",
+    ):
+        for path in output_dir.glob(pattern):
+            if path.is_file():
+                path.unlink()
+
+
 def build_scene_search_assets(run_dir: Path, output_dir: Path) -> dict[str, Any]:
     run_dir = run_dir.resolve()
     output_dir = output_dir.resolve()
+    _clear_existing_search_assets(output_dir)
 
     docs, entities = load_scene_corpus(run_dir)
     entity_note_paths = build_entity_note_paths(entities)
