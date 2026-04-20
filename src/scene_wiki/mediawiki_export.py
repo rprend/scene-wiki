@@ -47,6 +47,21 @@ class MediaWikiPage:
 class EntityArticleDraft:
     lede: str
     paragraphs: list[str]
+    citations: list[dict[str, str]]
+
+
+ENTITY_ARTICLE_STYLE_GUIDE = """\
+Style guide:
+- Voice: synthesize intellectual rigor with gleeful provocation. Write like someone who genuinely loves ideas and equally loves watching them get weird, uncomfortable, or self-defeating. Default to confident curiosity, not academic hedging.
+- Sentence architecture: open with the sharpest declarative claim first, then unpack it. Vary sentence length aggressively: long build, short punch. Build paragraphs by stating the thesis, complicating it, giving examples, then landing a conclusion that is more right, more wrong, or weirder than expected.
+- Point of view: use "I" only when explicitly staking a judgment. Avoid fake neutrality.
+- Punctuation: use em dashes for interruptions that stay on track, rhetorical questions sparingly, and colons to introduce evidence or quotations without filler.
+- Vocabulary: prefer precision over impressiveness. Use plain language when it hits harder.
+- Tone: stay dry, sharp, and intellectually amused, but do not become flippant.
+- Assertions: when uncertain, own the uncertainty directly.
+- Formatting: return concise synthesis, then supporting direct quotation where evidence is strong.
+- Non-negotiables: never bury the point, never dilute a clear conclusion, and always tie claims to quoted evidence when available.
+"""
 
 
 ENTITY_ARTICLE_PROMPT = """\
@@ -61,18 +76,32 @@ Rules:
 - Write like a compact encyclopedia entry, not metadata or analytics output.
 - Prefer concrete context over generic statements.
 - If the evidence is thin, still write a short factual paragraph rather than a template blurb.
+- Include direct quotation and citations when the evidence supports it.
+- Prefer citation breadth when the evidence supports it.
+- Surface uncertainty when evidence is thin or conflicting.
+- Prefer 2 to 5 citations when the supplied material supports that many. Use multiple distinct quotations from the same issue when that is all you have.
+- Pull quotations from both the issue excerpt and the retained evidence snippets when possible.
+- The prose should make at least one hard claim up front, then cash it out with specifics.
 - No bullet points. No headings. No markdown beyond plain text.
 
 Return ONLY valid JSON in this shape:
 {
   "lede": "one short opening paragraph",
-  "paragraphs": ["optional second paragraph", "optional third paragraph"]
+  "paragraphs": ["optional second paragraph", "optional third paragraph"],
+  "citations": [
+    {
+      "issue_title": "exact issue title from the supplied material",
+      "quote": "exact or tightly cleaned quotation from the supplied material",
+      "note": "what this quotation establishes"
+    }
+  ]
 }
 """
 
 DEFAULT_ENTITY_ARTICLE_MODEL = "gpt-4.1-mini"
 ENTITY_ARTICLE_MAX_DOC_CHARS = 1600
 ENTITY_ARTICLE_MAX_EVIDENCE = 6
+ENTITY_ARTICLE_PROMPT_VERSION = "v3"
 
 
 def _sanitize_title(value: str) -> str:
@@ -174,7 +203,18 @@ def _entity_article_payload(
 
 
 def _entity_article_cache_path(cache_dir: Path, payload: dict[str, Any], model: str) -> Path:
-    digest = hashlib.sha256(json.dumps({"model": model, "payload": payload}, sort_keys=True).encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(
+        json.dumps(
+            {
+                "version": ENTITY_ARTICLE_PROMPT_VERSION,
+                "model": model,
+                "styleGuide": ENTITY_ARTICLE_STYLE_GUIDE,
+                "prompt": ENTITY_ARTICLE_PROMPT,
+                "payload": payload,
+            },
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
     safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", payload["entity"]["name"] or "entity")[:80]
     return cache_dir / f"{safe_name}-{digest[:16]}.json"
 
@@ -188,9 +228,18 @@ def _load_cached_entity_article(cache_path: Path) -> EntityArticleDraft | None:
         return None
     lede = str(payload.get("lede", "")).strip()
     paragraphs = [str(item).strip() for item in payload.get("paragraphs", []) if str(item).strip()]
+    citations = [
+        {
+            "issue_title": str(item.get("issue_title", "")).strip(),
+            "quote": str(item.get("quote", "")).strip(),
+            "note": str(item.get("note", "")).strip(),
+        }
+        for item in payload.get("citations", [])
+        if str(item.get("issue_title", "")).strip() and str(item.get("quote", "")).strip()
+    ]
     if not lede:
         return None
-    return EntityArticleDraft(lede=lede, paragraphs=paragraphs)
+    return EntityArticleDraft(lede=lede, paragraphs=paragraphs, citations=citations)
 
 
 def _entity_role_phrase(entity: dict[str, Any]) -> str:
@@ -301,6 +350,16 @@ def _fallback_entity_article(
     return EntityArticleDraft(
         lede=_entity_lede(entity=entity, issue_ids=issue_ids, docs=docs, issue_titles=issue_titles),
         paragraphs=[],
+        citations=[
+            {
+                "issue_title": docs[doc_id].get("title", doc_id),
+                "quote": _clean_evidence_sentence(item),
+                "note": "Primary source evidence retained by the extraction pipeline.",
+            }
+            for doc_id in issue_ids[:1]
+            for item in [e for e in entity.get("evidence", []) if e][:2]
+            if _clean_evidence_sentence(item)
+        ],
     )
 
 
@@ -328,7 +387,11 @@ def _synthesize_entity_article(
         return cached
 
     print(f"Synthesizing MediaWiki article for {entity.get('name', 'entity')} ({entity_id}).", flush=True)
-    prompt = f"{ENTITY_ARTICLE_PROMPT}\n\nSOURCE MATERIAL:\n{json.dumps(payload, ensure_ascii=False, indent=2)}"
+    prompt = (
+        f"{ENTITY_ARTICLE_PROMPT}\n\n"
+        f"{ENTITY_ARTICLE_STYLE_GUIDE}\n\n"
+        f"SOURCE MATERIAL:\n{json.dumps(payload, ensure_ascii=False, indent=2)}"
+    )
     usage_dir = _entity_article_usage_dir(run_dir)
     previous_usage_dir = os.environ.get("SCENE_WIKI_AI_USAGE_DIR")
     os.environ["SCENE_WIKI_AI_USAGE_DIR"] = str(usage_dir)
@@ -375,6 +438,15 @@ def _synthesize_entity_article(
         draft = EntityArticleDraft(
             lede=str(data.get("lede", "")).strip(),
             paragraphs=[str(item).strip() for item in data.get("paragraphs", []) if str(item).strip()],
+            citations=[
+                {
+                    "issue_title": str(item.get("issue_title", "")).strip(),
+                    "quote": str(item.get("quote", "")).strip(),
+                    "note": str(item.get("note", "")).strip(),
+                }
+                for item in data.get("citations", [])
+                if str(item.get("issue_title", "")).strip() and str(item.get("quote", "")).strip()
+            ],
         )
         if not draft.lede:
             raise ValueError("Missing lede")
@@ -382,7 +454,12 @@ def _synthesize_entity_article(
         draft = _fallback_entity_article(entity=entity, issue_ids=issue_ids, docs=docs, issue_titles=issue_titles)
 
     cache_path.write_text(
-        json.dumps({"lede": draft.lede, "paragraphs": draft.paragraphs}, ensure_ascii=False, indent=2) + "\n",
+        json.dumps(
+            {"lede": draft.lede, "paragraphs": draft.paragraphs, "citations": draft.citations},
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
         encoding="utf-8",
     )
     return draft
@@ -518,6 +595,22 @@ def _render_entity_page(
     ]
     for paragraph in article.paragraphs:
         lines.extend(["", paragraph])
+    if article.citations:
+        lines.extend(["", "== Source citations =="])
+        for citation in article.citations[:6]:
+            issue_title = citation["issue_title"]
+            issue_link = next(
+                (
+                    _wiki_link(issue_titles[doc_id], docs[doc_id].get("title", doc_id))
+                    for doc_id in issue_ids
+                    if docs[doc_id].get("title", doc_id) == issue_title
+                ),
+                issue_title,
+            )
+            lines.append(f"* {issue_link}")
+            lines.append(f"*: \"{citation['quote']}\"")
+            if citation.get("note"):
+                lines.append(f"*: {citation['note']}")
     lines.extend([
         "",
         "== Corpus metadata ==",
