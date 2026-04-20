@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections import deque
 from pathlib import Path
@@ -177,6 +178,65 @@ def site_url_is_live(url: str) -> bool:
         return False
 
 
+def cloudflare_api_request(path: str, *, method: str = "GET", payload: dict | None = None) -> dict:
+    account_id = require_env("CLOUDFLARE_ACCOUNT_ID")
+    api_token = require_env("CLOUDFLARE_API_TOKEN")
+    url = f"https://api.cloudflare.com/client/v4{path}"
+    data = None
+    headers = {
+        "Authorization": f"Bearer {api_token}",
+        "Accept": "application/json",
+    }
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(url, data=data, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        error_body = exc.read().decode("utf-8", "replace")
+        raise RuntimeError(f"Cloudflare API {method} {path} failed: {exc.code} {error_body}") from exc
+    if not body.get("success", False):
+        raise RuntimeError(f"Cloudflare API {method} {path} failed: {json.dumps(body)}")
+    return body
+
+
+def lookup_zone_id(zone_name: str) -> str:
+    payload = cloudflare_api_request(f"/zones?name={urllib.parse.quote(zone_name)}")
+    results = payload.get("result") or []
+    if not results:
+        raise RuntimeError(f"Cloudflare zone not found for {zone_name}")
+    return results[0]["id"]
+
+
+def ensure_custom_domain_dns_record(domain_name: str, target_host: str, zone_name: str) -> None:
+    zone_id = lookup_zone_id(zone_name)
+    existing_payload = cloudflare_api_request(
+        f"/zones/{zone_id}/dns_records?name={urllib.parse.quote(domain_name)}"
+    )
+    existing_records = existing_payload.get("result") or []
+    desired = {
+        "type": "CNAME",
+        "name": domain_name,
+        "content": target_host,
+        "ttl": 1,
+        "proxied": False,
+    }
+    if existing_records:
+        record = existing_records[0]
+        if (
+            record.get("type") == "CNAME"
+            and record.get("name") == domain_name
+            and record.get("content") == target_host
+            and record.get("proxied") is False
+        ):
+            return
+        cloudflare_api_request(f"/zones/{zone_id}/dns_records/{record['id']}", method="PUT", payload=desired)
+        return
+    cloudflare_api_request(f"/zones/{zone_id}/dns_records", method="POST", payload=desired)
+
+
 def wait_for_custom_domain(domain_name: str, *, timeout_seconds: int = 600, poll_seconds: int = 10) -> bool:
     deadline = time.monotonic() + timeout_seconds
     url = f"https://{domain_name}"
@@ -198,9 +258,44 @@ def try_activate_custom_domain(
     job_id: str,
     project_name: str,
     custom_domain: str,
+    main_domain: str,
 ) -> bool:
     log_event(base_url, job_id, "Activating subdomain.", payload={"stage": "domain", "overallProgressPct": 99})
-    add_custom_domain(project_name, custom_domain)
+    dns_ready = True
+    try:
+        ensure_custom_domain_dns_record(custom_domain, f"{project_name}.pages.dev", main_domain)
+    except Exception as exc:  # noqa: BLE001
+        dns_ready = False
+        log_event(
+            base_url,
+            job_id,
+            "DNS automation is unavailable. Using Pages URL for now.",
+            level="warning",
+            payload={"stage": "domain", "customDomain": custom_domain, "error": str(exc)},
+        )
+
+    try:
+        add_custom_domain(project_name, custom_domain)
+    except Exception as exc:  # noqa: BLE001
+        log_event(
+            base_url,
+            job_id,
+            "Custom domain attach is unavailable. Using Pages URL for now.",
+            level="warning",
+            payload={"stage": "domain", "customDomain": custom_domain, "error": str(exc)},
+        )
+        return False
+
+    if not dns_ready:
+        log_event(
+            base_url,
+            job_id,
+            "Custom domain is attached in Pages but DNS is not automated yet. Using Pages URL for now.",
+            level="warning",
+            payload={"stage": "domain", "customDomain": custom_domain},
+        )
+        return False
+
     if wait_for_custom_domain(custom_domain):
         log_event(
             base_url,
@@ -730,6 +825,7 @@ def handle_job(base_url: str, job: dict, workdir: Path) -> None:
             job_id=job["id"],
             project_name=project_name,
             custom_domain=custom_domain,
+            main_domain=main_domain,
         )
 
         api_request(
