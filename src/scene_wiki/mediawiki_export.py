@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
 from collections import Counter
 from collections import defaultdict
@@ -10,6 +12,10 @@ from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import escape
 
+from openai import OpenAI
+
+from .config import get_settings
+from .openai_usage import record_openai_usage
 from .scene_search import build_scene_search_assets
 from .scene_wiki import CATEGORY_DESCRIPTIONS
 from .scene_wiki import CATEGORY_TITLES
@@ -35,6 +41,38 @@ If you want the AlphaLoop-style semantic search UI inside MediaWiki itself, load
 class MediaWikiPage:
     title: str
     text: str
+
+
+@dataclass
+class EntityArticleDraft:
+    lede: str
+    paragraphs: list[str]
+
+
+ENTITY_ARTICLE_PROMPT = """\
+You are writing a concise encyclopedia article for a source-grounded community wiki.
+
+Write clean, readable prose about the entity using ONLY the supplied source material.
+
+Rules:
+- Do not say "this archive", "this corpus", "recurring", or mention raw counts in the prose.
+- Do not invent facts not supported by the supplied issue titles, issue excerpts, or evidence snippets.
+- You may make light inferences that are directly supported by the source material.
+- Write like a compact encyclopedia entry, not metadata or analytics output.
+- Prefer concrete context over generic statements.
+- If the evidence is thin, still write a short factual paragraph rather than a template blurb.
+- No bullet points. No headings. No markdown beyond plain text.
+
+Return ONLY valid JSON in this shape:
+{
+  "lede": "one short opening paragraph",
+  "paragraphs": ["optional second paragraph", "optional third paragraph"]
+}
+"""
+
+DEFAULT_ENTITY_ARTICLE_MODEL = "gpt-4.1-mini"
+ENTITY_ARTICLE_MAX_DOC_CHARS = 1600
+ENTITY_ARTICLE_MAX_EVIDENCE = 6
 
 
 def _sanitize_title(value: str) -> str:
@@ -73,6 +111,86 @@ def _wiki_link(target: str, label: str | None = None) -> str:
 def _category_tag(category: str) -> str:
     category_title = CATEGORY_TITLES.get(category, category.replace("_", " ").title())
     return f"[[Category:{category_title}]]"
+
+
+def _entity_article_model() -> str:
+    return os.getenv("SCENE_WIKI_MEDIAWIKI_ARTICLE_MODEL", DEFAULT_ENTITY_ARTICLE_MODEL).strip() or DEFAULT_ENTITY_ARTICLE_MODEL
+
+
+def _entity_article_cache_dir(run_dir: Path) -> Path:
+    cache_dir = run_dir / "artifacts" / "mediawiki-entity-articles"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
+
+
+def _entity_article_usage_dir(run_dir: Path) -> Path:
+    usage_dir = run_dir / "artifacts" / "mediawiki-article-usage"
+    usage_dir.mkdir(parents=True, exist_ok=True)
+    return usage_dir
+
+
+def _entity_article_should_use_ai(entity: dict[str, Any], issue_ids: list[str]) -> bool:
+    if not issue_ids:
+        return False
+    category = (entity.get("category") or "").strip().lower()
+    return category not in {"social_account", "social_accounts"}
+
+
+def _trim_doc_excerpt(text: str) -> str:
+    clean = re.sub(r"\s+", " ", (text or "").strip())
+    return clean[:ENTITY_ARTICLE_MAX_DOC_CHARS].strip()
+
+
+def _entity_article_payload(
+    *,
+    entity: dict[str, Any],
+    issue_ids: list[str],
+    docs: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    issue_contexts: list[dict[str, Any]] = []
+    for doc_id in issue_ids[:3]:
+        doc = docs.get(doc_id)
+        if not doc:
+            continue
+        issue_contexts.append(
+            {
+                "title": doc.get("title", doc_id),
+                "publishedAt": doc.get("published_at"),
+                "excerpt": _trim_doc_excerpt(doc.get("text", "")),
+            }
+        )
+    return {
+        "entity": {
+            "name": entity.get("name"),
+            "category": entity.get("category"),
+            "aliases": entity.get("aliases", []),
+            "platform": entity.get("platform"),
+            "handle": entity.get("handle"),
+            "workType": entity.get("work_type"),
+        },
+        "evidence": [item for item in entity.get("evidence", []) if item][:ENTITY_ARTICLE_MAX_EVIDENCE],
+        "issues": issue_contexts,
+    }
+
+
+def _entity_article_cache_path(cache_dir: Path, payload: dict[str, Any], model: str) -> Path:
+    digest = hashlib.sha256(json.dumps({"model": model, "payload": payload}, sort_keys=True).encode("utf-8")).hexdigest()
+    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", payload["entity"]["name"] or "entity")[:80]
+    return cache_dir / f"{safe_name}-{digest[:16]}.json"
+
+
+def _load_cached_entity_article(cache_path: Path) -> EntityArticleDraft | None:
+    if not cache_path.exists():
+        return None
+    try:
+        payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    lede = str(payload.get("lede", "")).strip()
+    paragraphs = [str(item).strip() for item in payload.get("paragraphs", []) if str(item).strip()]
+    if not lede:
+        return None
+    return EntityArticleDraft(lede=lede, paragraphs=paragraphs)
 
 
 def _entity_role_phrase(entity: dict[str, Any]) -> str:
@@ -171,6 +289,103 @@ def _entity_lede(
             lines.append(f"In this corpus, {name} appears in {linked_issues}.")
 
     return " ".join(lines).strip()
+
+
+def _fallback_entity_article(
+    *,
+    entity: dict[str, Any],
+    issue_ids: list[str],
+    docs: dict[str, dict[str, Any]],
+    issue_titles: dict[str, str],
+) -> EntityArticleDraft:
+    return EntityArticleDraft(
+        lede=_entity_lede(entity=entity, issue_ids=issue_ids, docs=docs, issue_titles=issue_titles),
+        paragraphs=[],
+    )
+
+
+def _synthesize_entity_article(
+    *,
+    run_dir: Path,
+    entity_id: int,
+    entity: dict[str, Any],
+    issue_ids: list[str],
+    docs: dict[str, dict[str, Any]],
+    issue_titles: dict[str, str],
+) -> EntityArticleDraft:
+    if not _entity_article_should_use_ai(entity, issue_ids):
+        return _fallback_entity_article(entity=entity, issue_ids=issue_ids, docs=docs, issue_titles=issue_titles)
+
+    api_key = get_settings().openai_api_key
+    if not api_key:
+        return _fallback_entity_article(entity=entity, issue_ids=issue_ids, docs=docs, issue_titles=issue_titles)
+
+    payload = _entity_article_payload(entity=entity, issue_ids=issue_ids, docs=docs)
+    model = _entity_article_model()
+    cache_path = _entity_article_cache_path(_entity_article_cache_dir(run_dir), payload, model)
+    cached = _load_cached_entity_article(cache_path)
+    if cached:
+        return cached
+
+    print(f"Synthesizing MediaWiki article for {entity.get('name', 'entity')} ({entity_id}).", flush=True)
+    prompt = f"{ENTITY_ARTICLE_PROMPT}\n\nSOURCE MATERIAL:\n{json.dumps(payload, ensure_ascii=False, indent=2)}"
+    usage_dir = _entity_article_usage_dir(run_dir)
+    previous_usage_dir = os.environ.get("SCENE_WIKI_AI_USAGE_DIR")
+    os.environ["SCENE_WIKI_AI_USAGE_DIR"] = str(usage_dir)
+    try:
+        client = OpenAI(api_key=api_key)
+        response = client.responses.create(
+            model=model,
+            input=prompt,
+            max_output_tokens=900,
+        )
+        usage = getattr(response, "usage", None)
+        record_openai_usage(
+            requested_model=model,
+            resolved_model=getattr(response, "model", None),
+            response_id=getattr(response, "id", None),
+            input_tokens=int(getattr(usage, "input_tokens", 0) or 0),
+            output_tokens=int(getattr(usage, "output_tokens", 0) or 0),
+            total_tokens=int(getattr(usage, "total_tokens", 0) or 0),
+            prompt_chars=len(prompt),
+            prompt_text=prompt,
+            response_text=response.output_text,
+            chunk_id=f"entity-{entity_id}",
+            doc_id=",".join(issue_ids[:3]) or None,
+        )
+    finally:
+        if previous_usage_dir is None:
+            os.environ.pop("SCENE_WIKI_AI_USAGE_DIR", None)
+        else:
+            os.environ["SCENE_WIKI_AI_USAGE_DIR"] = previous_usage_dir
+
+    raw = response.output_text.strip()
+    if "```json" in raw:
+        raw = raw.split("```json", 1)[1].split("```", 1)[0].strip()
+    elif "```" in raw:
+        raw = raw.split("```", 1)[1].split("```", 1)[0].strip()
+    if not raw.startswith("{"):
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start >= 0 and end > start:
+            raw = raw[start : end + 1]
+
+    try:
+        data = json.loads(raw)
+        draft = EntityArticleDraft(
+            lede=str(data.get("lede", "")).strip(),
+            paragraphs=[str(item).strip() for item in data.get("paragraphs", []) if str(item).strip()],
+        )
+        if not draft.lede:
+            raise ValueError("Missing lede")
+    except Exception:
+        draft = _fallback_entity_article(entity=entity, issue_ids=issue_ids, docs=docs, issue_titles=issue_titles)
+
+    cache_path.write_text(
+        json.dumps({"lede": draft.lede, "paragraphs": draft.paragraphs}, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return draft
 
 
 def _render_main_page(
@@ -272,6 +487,7 @@ def _render_issue_page(
 
 def _render_entity_page(
     *,
+    run_dir: Path,
     entity_id: int,
     entity: dict[str, Any],
     docs: dict[str, dict[str, Any]],
@@ -286,22 +502,29 @@ def _render_entity_page(
         related_counts[entity_id].items(),
         key=lambda item: (-item[1], entity_titles[item[0]].lower()),
     )[:20]
+    article = _synthesize_entity_article(
+        run_dir=run_dir,
+        entity_id=entity_id,
+        entity=entity,
+        issue_ids=issue_ids,
+        docs=docs,
+        issue_titles=issue_titles,
+    )
 
     lines = [
         f"= {entity.get('name', entity_titles[entity_id])} =",
         "",
-        _entity_lede(
-            entity=entity,
-            issue_ids=issue_ids,
-            docs=docs,
-            issue_titles=issue_titles,
-        ),
+        article.lede,
+    ]
+    for paragraph in article.paragraphs:
+        lines.extend(["", paragraph])
+    lines.extend([
         "",
         "== Corpus metadata ==",
         f"* Category: {CATEGORY_TITLES.get(entity.get('category', ''), entity.get('category', '').title())}",
         f"* Mention count: {entity.get('mention_count', 0)}",
         f"* Issue count: {len(issue_ids)}",
-    ]
+    ])
     if entity.get("first_seen"):
         lines.append(f"* First seen: {_human_date(entity.get('first_seen'))}")
     if entity.get("last_seen"):
@@ -457,6 +680,7 @@ def build_mediawiki_export(
             MediaWikiPage(
                 title=entity_titles[entity_id],
                 text=_render_entity_page(
+                    run_dir=run_dir,
                     entity_id=entity_id,
                     entity=entity,
                     docs=docs,
