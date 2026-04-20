@@ -13,7 +13,6 @@ from xml.sax.saxutils import escape
 from .scene_search import build_scene_search_assets
 from .scene_wiki import CATEGORY_DESCRIPTIONS
 from .scene_wiki import CATEGORY_TITLES
-from .scene_wiki import _entity_blurb
 from .scene_wiki import _external_link_values
 from .scene_wiki import _human_date
 from .scene_wiki import build_doc_entities
@@ -76,6 +75,104 @@ def _category_tag(category: str) -> str:
     return f"[[Category:{category_title}]]"
 
 
+def _entity_role_phrase(entity: dict[str, Any]) -> str:
+    category = (entity.get("category", "") or "").strip().lower()
+    platform = entity.get("platform")
+    work_type = entity.get("work_type")
+    if category in {"people", "person"}:
+        return "a person"
+    if category in {"organizations", "organization"}:
+        return "an organization"
+    if category in {"places", "place"}:
+        return "a place"
+    if category in {"concepts", "concept"}:
+        return "an idea or concept"
+    if category in {"books", "book"}:
+        return f"a {work_type}" if work_type else "a written work"
+    if category in {"publications", "publication"}:
+        return "a publication"
+    if category in {"social_accounts", "social_account"}:
+        if platform:
+            return f"a social account on {platform}"
+        return "a social account"
+    if category in {"films", "film"}:
+        return "a film"
+    if category in {"music", "song"}:
+        return "a piece of music"
+    if category in {"events", "event"}:
+        return "an event"
+    if category in {"brands", "brand"}:
+        return "a brand"
+    if category in {"venues", "venue"}:
+        return "a venue"
+    return "an entity"
+
+
+def _clean_evidence_sentence(text: str) -> str:
+    cleaned = re.sub(r"\s+", " ", (text or "").strip()).strip(' "')
+    if not cleaned:
+        return ""
+    if cleaned[-1] not in ".!?":
+        cleaned += "."
+    return cleaned
+
+
+def _issue_links(issue_ids: list[str], issue_titles: dict[str, str], docs: dict[str, dict[str, Any]], limit: int = 3) -> str:
+    selected = issue_ids[:limit]
+    links = [_wiki_link(issue_titles[doc_id], docs[doc_id].get("title", doc_id)) for doc_id in selected]
+    if not links:
+        return ""
+    if len(links) == 1:
+        return links[0]
+    if len(links) == 2:
+        return f"{links[0]} and {links[1]}"
+    return f"{', '.join(links[:-1])}, and {links[-1]}"
+
+
+def _entity_lede(
+    *,
+    entity: dict[str, Any],
+    issue_ids: list[str],
+    docs: dict[str, dict[str, Any]],
+    issue_titles: dict[str, str],
+) -> str:
+    name = entity.get("name", "This entry")
+    role = _entity_role_phrase(entity)
+    first_issue = docs[issue_ids[0]] if issue_ids else None
+    first_issue_link = _wiki_link(issue_titles[issue_ids[0]], first_issue.get("title", issue_ids[0])) if first_issue and issue_ids else None
+    mention_count = int(entity.get("mention_count", 0) or 0)
+    evidence = [item for item in entity.get("evidence", []) if item]
+    primary_quote = _clean_evidence_sentence(evidence[0]) if evidence else ""
+    secondary_quote = _clean_evidence_sentence(evidence[1]) if len(evidence) > 1 else ""
+
+    lines: list[str] = []
+    if first_issue_link:
+        lines.append(
+            f"'''{name}''' appears in this archive as {role} discussed in {first_issue_link}."
+        )
+    else:
+        lines.append(f"'''{name}''' appears in this archive as {role}.")
+
+    if primary_quote:
+        if secondary_quote and secondary_quote != primary_quote:
+            lines.append(
+                f"The source material connects {name} to passages such as \"{primary_quote}\" and \"{secondary_quote}\"."
+            )
+        else:
+            lines.append(f"The source material connects {name} to the passage \"{primary_quote}\".")
+
+    linked_issues = _issue_links(issue_ids, issue_titles, docs)
+    if linked_issues:
+        if mention_count > 1:
+            lines.append(
+                f"In this corpus, {name} appears {mention_count} times across {len(issue_ids)} issues, including {linked_issues}."
+            )
+        else:
+            lines.append(f"In this corpus, {name} appears in {linked_issues}.")
+
+    return " ".join(lines).strip()
+
+
 def _render_main_page(
     *,
     site_title: str,
@@ -90,35 +187,54 @@ def _render_main_page(
         key=lambda idx: (-int(entities[idx].get("mention_count", 0)), entity_titles[idx].lower()),
     )[:25]
     recent_issues = sorted(docs.items(), key=lambda item: item[1].get("published_at") or "", reverse=True)[:25]
+    top_categories = sorted(category_counts.items(), key=lambda item: (-item[1], item[0]))[:8]
+    guided_entities = top_entities[:8]
 
     lines = [
         f"= {site_title} =",
         "",
-        "This MediaWiki export is generated from the primary-source archive and the extracted scene graph.",
+        f"'''{site_title}''' is a source-grounded wiki built from the publication archive. It turns episodes and posts into browsable article pages for people, places, books, organizations, ideas, and other recurring references in the community.",
         "",
-        "== Corpus summary ==",
-        f"* Issues imported: {len(docs)}",
-        f"* Entities imported: {len(entities)}",
+        "Use this wiki in three ways: start from a conversation, jump into a category, or open one of the frequently referenced entity pages below.",
         "",
-        "== Entity categories ==",
+        "== Start here ==",
+        "* Visit [[Semantic search]] to run semantic search over the archive and jump directly into relevant pages.",
+        "* Browse the latest imported conversations under ''Recent conversations''.",
+        "* Open a category page under ''Browse by category'' to explore a specific slice of the corpus.",
+        "",
+        "== Browse by category ==",
     ]
-    for category, count in sorted(category_counts.items(), key=lambda item: (-item[1], item[0])):
+    for category, count in top_categories:
         category_title = CATEGORY_TITLES.get(category, category.replace("_", " ").title())
-        lines.append(f"* [[Category:{category_title}|{category_title}]] ({count})")
-
-    lines.extend(["", "== Most-mentioned entities =="])
-    for entity_id in top_entities:
-        entity = entities[entity_id]
         lines.append(
-            f"* {_wiki_link(entity_titles[entity_id])} ({entity.get('mention_count', 0)} mentions, "
-            f"{CATEGORY_TITLES.get(entity.get('category', ''), entity.get('category', '').title())})"
+            f"* [[Category:{category_title}|{category_title}]]: {count} article pages grouped under {category_title.lower()}."
         )
 
-    lines.extend(["", "== Recent issues =="])
+    lines.extend(["", "== Good pages to start with =="])
+    for entity_id in guided_entities:
+        entity = entities[entity_id]
+        lines.append(
+            f"* {_wiki_link(entity_titles[entity_id])}: "
+            f"{CATEGORY_TITLES.get(entity.get('category', ''), entity.get('category', '').title())} page with "
+            f"{entity.get('mention_count', 0)} corpus mentions."
+        )
+
+    lines.extend(["", "== Recent conversations =="])
     for doc_id, doc in recent_issues:
         lines.append(f"* {_wiki_link(issue_titles[doc_id], doc.get('title', doc_id))}")
 
-    lines.extend(["", "== Semantic search ==", WIKITEXT_SEARCH_NOTE])
+    lines.extend(
+        [
+            "",
+            "== About this corpus ==",
+            f"* Issues imported: {len(docs)}",
+            f"* Entity pages imported: {len(entities)}",
+            "* Each article is generated from extracted references in the source archive and keeps links back to the underlying conversations.",
+            "",
+            "== Semantic search ==",
+            WIKITEXT_SEARCH_NOTE,
+        ]
+    )
     return "\n".join(lines).strip() + "\n"
 
 
@@ -174,7 +290,12 @@ def _render_entity_page(
     lines = [
         f"= {entity.get('name', entity_titles[entity_id])} =",
         "",
-        _entity_blurb(entity, docs, related_counts, entities, entity_id),
+        _entity_lede(
+            entity=entity,
+            issue_ids=issue_ids,
+            docs=docs,
+            issue_titles=issue_titles,
+        ),
         "",
         "== Corpus metadata ==",
         f"* Category: {CATEGORY_TITLES.get(entity.get('category', ''), entity.get('category', '').title())}",
