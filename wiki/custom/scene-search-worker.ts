@@ -64,6 +64,14 @@ const chunkShardPromises = new Map<string, Promise<SearchChunk[]>>()
 let entitiesPromise: Promise<Record<string, SearchEntity>> | undefined
 const entityShardPromises = new Map<string, Promise<Record<string, SearchEntity>>>()
 
+function getSearchBasePath(request: Request): string {
+  const pathname = new URL(request.url).pathname
+  if (pathname.endsWith("/api/search")) {
+    return pathname.slice(0, -"/api/search".length)
+  }
+  return ""
+}
+
 function getApiKey(env: Env): string {
   const apiKey = env.GOOGLE_API_KEY || env.GEMINI_API_KEY
   if (!apiKey) {
@@ -74,6 +82,7 @@ function getApiKey(env: Env): string {
 
 async function getIndex(env: Env, request: Request): Promise<SearchIndex> {
   if (!indexPromise) {
+    const basePath = getSearchBasePath(request)
     indexPromise = env.ASSETS.fetch(new URL("/scene-search-index.json", request.url)).then(
       async (response: Response) => {
         if (!response.ok) {
@@ -82,6 +91,16 @@ async function getIndex(env: Env, request: Request): Promise<SearchIndex> {
         return (await response.json()) as SearchIndex
       },
     )
+    if (basePath) {
+      indexPromise = env.ASSETS.fetch(new URL(`${basePath}/scene-search-index.json`, request.url)).then(
+        async (response: Response) => {
+          if (!response.ok) {
+            throw new Error(`Search index unavailable (${response.status})`)
+          }
+          return (await response.json()) as SearchIndex
+        },
+      )
+    }
   }
   return await indexPromise
 }
@@ -96,7 +115,9 @@ async function getChunkShard(
     return await cached
   }
 
-  const promise = env.ASSETS.fetch(new URL(`/${path.replace(/^\/+/, "")}`, request.url)).then(
+  const basePath = getSearchBasePath(request)
+  const assetPath = `${basePath}/${path.replace(/^\/+/, "")}`.replace(/\/+/g, "/")
+  const promise = env.ASSETS.fetch(new URL(assetPath, request.url)).then(
     async (response: Response) => {
       if (!response.ok) {
         throw new Error(`Search chunk shard unavailable (${response.status}) for ${path}`)
@@ -118,7 +139,9 @@ async function getEntities(env: Env, request: Request, index: SearchIndex): Prom
   }
   if (!entitiesPromise) {
     if (index.entities_path) {
-      entitiesPromise = env.ASSETS.fetch(new URL(`/${index.entities_path.replace(/^\/+/, "")}`, request.url)).then(
+      const basePath = getSearchBasePath(request)
+      const entityPath = `${basePath}/${index.entities_path.replace(/^\/+/, "")}`.replace(/\/+/g, "/")
+      entitiesPromise = env.ASSETS.fetch(new URL(entityPath, request.url)).then(
         async (response: Response) => {
           if (!response.ok) {
             throw new Error(`Search entities unavailable (${response.status})`)
@@ -133,7 +156,9 @@ async function getEntities(env: Env, request: Request, index: SearchIndex): Prom
         for (const shard of index.entity_shards ?? []) {
           let shardPromise = entityShardPromises.get(shard.path)
           if (!shardPromise) {
-            shardPromise = env.ASSETS.fetch(new URL(`/${shard.path.replace(/^\/+/, "")}`, request.url)).then(
+            const basePath = getSearchBasePath(request)
+            const shardPath = `${basePath}/${shard.path.replace(/^\/+/, "")}`.replace(/\/+/g, "/")
+            shardPromise = env.ASSETS.fetch(new URL(shardPath, request.url)).then(
               async (response: Response) => {
                 if (!response.ok) {
                   throw new Error(`Search entity shard unavailable (${response.status}) for ${shard.path}`)

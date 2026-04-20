@@ -45,15 +45,20 @@ def merge_entities_with_links(
 
     for entity in entities:
         record = entity.model_dump(mode="json")
+        if record.get("category") == "instagram_account":
+            record["category"] = "social_account"
+            record.setdefault("platform", "instagram")
         entity_urls: set[str] = set()
-        entity_instagram: str | None = None
         entity_link_types: set[str] = set()
+        social_profiles: list[dict[str, str]] = []
+        seen_social_profiles: set[tuple[str, str]] = set()
 
-        if entity.category == "instagram_account":
-            handle = entity.name.lower().lstrip("@")
+        if record["category"] == "social_account":
+            handle = (record.get("handle") or entity.name).lower().lstrip("@")
             if handle in instagram_urls:
                 entity_urls.update(instagram_urls[handle])
-                entity_instagram = handle
+                record["platform"] = record.get("platform") or "instagram"
+                record["handle"] = record.get("handle") or handle
                 matched_handles.add(handle)
 
         name_lower = entity.name.lower()
@@ -63,13 +68,19 @@ def merge_entities_with_links(
                     entity_urls.add(info["url"])
                     entity_link_types.add(info["link_type"])
                     if info.get("instagram_handle"):
-                        entity_instagram = info["instagram_handle"]
-                        matched_handles.add(info["instagram_handle"])
+                        profile = ("instagram", info["instagram_handle"])
+                        if profile not in seen_social_profiles:
+                            social_profiles.append({"platform": "instagram", "handle": info["instagram_handle"], "url": info["url"]})
+                            seen_social_profiles.add(profile)
+                        if record["category"] == "social_account" and (record.get("platform") in {None, "instagram"}):
+                            record["platform"] = "instagram"
+                            record["handle"] = record.get("handle") or info["instagram_handle"]
+                            matched_handles.add(info["instagram_handle"])
 
         record["urls"] = sorted(entity_urls)
         record["link_types"] = sorted(entity_link_types)
-        if entity_instagram:
-            record["instagram_handle"] = entity_instagram
+        if social_profiles:
+            record["social_profiles"] = social_profiles
         enriched.append(record)
 
     for post_links in all_post_links:
@@ -86,7 +97,7 @@ def merge_entities_with_links(
                 enriched.append(
                     {
                         "name": f"@{link.instagram_handle}",
-                        "category": "instagram_account",
+                        "category": "social_account",
                         "aliases": [],
                         "mention_count": len(handle_post_ids),
                         "evidence": [f"Linked as: {link.anchor_text}" if link.anchor_text else "Instagram link"],
@@ -96,7 +107,12 @@ def merge_entities_with_links(
                         "last_seen": None,
                         "urls": sorted(handle_urls),
                         "link_types": ["instagram"],
-                        "instagram_handle": link.instagram_handle,
+                        "platform": "instagram",
+                        "handle": link.instagram_handle,
+                        "social_profiles": [
+                            {"platform": "instagram", "handle": link.instagram_handle, "url": url}
+                            for url in sorted(handle_urls)
+                        ],
                     }
                 )
 

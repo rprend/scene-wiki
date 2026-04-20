@@ -9,6 +9,7 @@ import shutil
 import typer
 
 from .generic_publication import scrape_generic_publication
+from .mediawiki_export import build_mediawiki_export
 from .newsletter_corpus import build_newsletter_corpus
 from .scene_search import build_scene_search_assets
 from .scene_wiki import build_obsidian_vault, build_scene_wiki, prepare_quartz_content
@@ -16,7 +17,7 @@ from .site import build_full_site
 from .substack import scrape_substack_archive
 
 
-app = typer.Typer(help="Generate an Obsidian-style Quartz wiki from a Substack archive.")
+app = typer.Typer(help="Generate Scene Wiki outputs from publication archives, including Quartz sites and MediaWiki exports.")
 
 
 def _default_quartz_concurrency() -> int:
@@ -112,6 +113,29 @@ def build_search_assets_command(run_dir: Path, output_dir: Path) -> None:
 def build_wiki_command(run_dir: Path, site_dir: Path, vault_dir: Optional[Path] = None) -> None:
     result = build_scene_wiki(run_dir=run_dir, site_dir=site_dir, vault_dir=vault_dir)
     typer.echo(result["site_dir"])
+
+
+@app.command("build-mediawiki-export")
+def build_mediawiki_export_command(
+    run_dir: Path,
+    output_dir: Path = Path("dist/mediawiki"),
+    site_title: Optional[str] = None,
+    build_search: bool = True,
+    wiki_dir: Path = Path("wiki"),
+) -> None:
+    typer.echo(f"Building MediaWiki export into {output_dir.resolve()}")
+    result = build_mediawiki_export(
+        run_dir=run_dir.resolve(),
+        output_dir=output_dir.resolve(),
+        site_title=site_title,
+        build_search=build_search,
+        wiki_dir=wiki_dir.resolve() if build_search else None,
+    )
+    typer.echo(
+        f"MediaWiki export complete: {result['import_xml']} "
+        f"({result['page_count']} pages, {result['entity_count']} entities, {result['issue_count']} issues)"
+    )
+    typer.echo(result["import_xml"])
 
 
 @app.command("build-run")
@@ -214,6 +238,50 @@ def build_substack_command(
     typer.echo(result["output_dir"])
 
 
+@app.command("build-substack-mediawiki")
+def build_substack_mediawiki_command(
+    archive_url: str,
+    subject: Optional[str] = None,
+    section_slug: Optional[str] = None,
+    max_articles: Optional[int] = None,
+    model: str = "sonnet",
+    workers: int = 10,
+    run_dir: Optional[Path] = None,
+    output_dir: Path = Path("dist/mediawiki"),
+    wiki_dir: Path = Path("wiki"),
+    site_title: Optional[str] = None,
+) -> None:
+    typer.echo(f"Scraping Substack archive: {archive_url}")
+    scrape_result = scrape_substack_archive(
+        archive_url,
+        subject=subject,
+        section_slug=section_slug,
+        max_articles=max_articles,
+        run_dir=run_dir,
+    )
+    actual_run_dir = Path(scrape_result["run_dir"])
+    typer.echo(
+        f"Saved {scrape_result['posts_saved']} posts from {scrape_result['archive_posts_selected']} selected archive entries "
+        f"({scrape_result['total_text_characters']} chars) into {actual_run_dir}"
+    )
+    typer.echo(
+        f"Estimated extraction: {scrape_result['estimated_total_chunks']} chunks / "
+        f"{scrape_result['estimated_input_tokens']} input tokens"
+    )
+    typer.echo(f"Building newsletter corpus in {actual_run_dir}")
+    build_newsletter_corpus(run_dir=actual_run_dir, model=model, workers=workers)
+    typer.echo(f"Building MediaWiki export into {output_dir.resolve()}")
+    result = build_mediawiki_export(
+        run_dir=actual_run_dir,
+        output_dir=output_dir.resolve(),
+        site_title=site_title or subject,
+        build_search=True,
+        wiki_dir=wiki_dir.resolve(),
+    )
+    typer.echo(f"MediaWiki export complete: {result['import_xml']}")
+    typer.echo(result["import_xml"])
+
+
 @app.command("build-publication")
 def build_publication_command(
     source_url: str,
@@ -263,6 +331,48 @@ def build_publication_command(
     )
     typer.echo(f"Site build complete: {result['output_dir']}")
     typer.echo(result["output_dir"])
+
+
+@app.command("build-publication-mediawiki")
+def build_publication_mediawiki_command(
+    source_url: str,
+    subject: Optional[str] = None,
+    max_articles: Optional[int] = None,
+    model: str = "sonnet",
+    workers: int = 10,
+    run_dir: Optional[Path] = None,
+    output_dir: Path = Path("dist/mediawiki"),
+    wiki_dir: Path = Path("wiki"),
+    site_title: Optional[str] = None,
+) -> None:
+    typer.echo(f"Scraping publication archive: {source_url}")
+    scrape_result = scrape_generic_publication(
+        source_url,
+        subject=subject,
+        max_articles=max_articles,
+        run_dir=run_dir,
+    )
+    actual_run_dir = Path(scrape_result["run_dir"])
+    typer.echo(
+        f"Saved {scrape_result['posts_saved']} posts from {scrape_result['archive_posts_selected']} selected publication entries "
+        f"({scrape_result['total_text_characters']} chars) into {actual_run_dir}"
+    )
+    typer.echo(
+        f"Estimated extraction: {scrape_result['estimated_total_chunks']} chunks / "
+        f"{scrape_result['estimated_input_tokens']} input tokens"
+    )
+    typer.echo(f"Building newsletter corpus in {actual_run_dir}")
+    build_newsletter_corpus(run_dir=actual_run_dir, model=model, workers=workers)
+    typer.echo(f"Building MediaWiki export into {output_dir.resolve()}")
+    result = build_mediawiki_export(
+        run_dir=actual_run_dir,
+        output_dir=output_dir.resolve(),
+        site_title=site_title or subject,
+        build_search=True,
+        wiki_dir=wiki_dir.resolve(),
+    )
+    typer.echo(f"MediaWiki export complete: {result['import_xml']}")
+    typer.echo(result["import_xml"])
 
 
 @app.command("deploy")

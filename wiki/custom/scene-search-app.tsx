@@ -85,6 +85,14 @@ function pageHref(path: string) {
   return `/${path.replace(/^\/+/, "")}`
 }
 
+function getSearchBasePath() {
+  if (typeof document === "undefined") return ""
+  const rootElement = document.querySelector("[data-scene-search-app]")
+  const raw = rootElement?.getAttribute("data-scene-search-base")?.trim() ?? ""
+  if (!raw || raw === "/") return ""
+  return raw.replace(/\/+$/, "")
+}
+
 function renderInlineMarkdown(text: string): React.ReactNode[] {
   const nodes: React.ReactNode[] = []
   const pattern =
@@ -786,6 +794,7 @@ function SearchThread({
 }
 
 function SearchApp() {
+  const searchBasePath = useMemo(() => getSearchBasePath(), [])
   const initialState = useMemo(() => loadPersistedThreads(), [])
   const [threads, setThreads] = useState<StoredThread[]>(initialState.threads)
   const [activeThreadId, setActiveThreadId] = useState(initialState.activeThreadId)
@@ -794,7 +803,7 @@ function SearchApp() {
       ?.progressEvents ?? [],
   )
   const runtime = useChatRuntime({
-    transport: new AssistantChatTransport({ api: "/api/search" }),
+    transport: new AssistantChatTransport({ api: `${searchBasePath}/api/search` || "/api/search" }),
     onData: (part: any) => {
       if (part.type === "data-search-progress") {
         setProgressEvents((events) => [...events, part.data as SearchProgressEvent])

@@ -1,20 +1,24 @@
 # Scene Wiki
 
-`scene-wiki` now has two layers:
+`scene-wiki` now has three layers:
 
-1. the generator, which turns a Substack archive into a browsable Quartz wiki with semantic search
-2. the platform app, which accepts public submissions, tracks jobs in D1, and publishes a collection of deployed scene wikis on Cloudflare
+1. the archive ingester, which scrapes Substack and generic publication archives into normalized runs
+2. the publisher layer, which can emit either a Quartz site or a MediaWiki import bundle with semantic search sidecars
+3. the platform app, which accepts public submissions, tracks jobs in D1, and publishes a collection of deployed scene wikis on Cloudflare
 
 ## What It Does
 
-Given a Substack publication URL, `scene-wiki` can:
+Given a Substack or generic publication URL, `scene-wiki` can:
 
 1. scrape the archive and individual post pages
 2. normalize the source text and save raw HTML
 3. extract recurring entities and outbound links into a corpus JSON
-4. generate an Obsidian-style vault and Quartz content tree
-5. build a static wiki site with a right-rail archive assistant
-6. optionally deploy the built site to Cloudflare Pages
+4. classify social accounts, essays, articles, books, and other scene entities more explicitly
+5. generate either:
+   - an Obsidian-style vault and Quartz content tree, or
+   - a MediaWiki XML import dump plus article-style wikitext pages
+6. build AlphaLoop-style semantic search assets as sharded sidecar JSON
+7. optionally deploy the Quartz path to Cloudflare Pages
 
 The platform layer adds:
 
@@ -29,7 +33,7 @@ The platform layer adds:
 - Python 3.10+
 - Node.js 20+
 - `npm`
-- `claude` CLI authenticated locally for entity extraction
+- `claude` CLI authenticated locally for Claude-based extraction, or an `OPENAI_API_KEY` for OpenAI extraction
 - `GOOGLE_API_KEY` or `GEMINI_API_KEY` for search embeddings
 - `CLOUDFLARE_ACCOUNT_ID` for deploys
 - `CLOUDFLARE_API_TOKEN` for Pages domain attachment in the platform runner
@@ -45,7 +49,7 @@ pip install -e .
 npm --prefix wiki ci
 ```
 
-Build a wiki from a Substack archive:
+Build a Quartz wiki from a Substack archive:
 
 ```bash
 scene-wiki build-substack \
@@ -61,6 +65,25 @@ That command will:
 - build `artifacts/corpus.json`
 - generate a vault under `vault/<slug>/`
 - build a static site under `dist/wiki/`
+
+Build a MediaWiki export from a generic publication:
+
+```bash
+scene-wiki build-publication-mediawiki \
+  https://conversationswithtyler.com/episodes/ \
+  --subject "Conversations with Tyler" \
+  --site-title "Conversations with Tyler" \
+  --output-dir dist/mediawiki/conversations-with-tyler
+```
+
+That command will:
+
+- create or reuse a run under `data/runs/`
+- scrape and normalize article pages
+- build `artifacts/corpus.json`
+- write article-style wikitext pages under `dist/mediawiki/.../pages/`
+- write a MediaWiki XML import bundle at `dist/mediawiki/.../mediawiki-import.xml`
+- write semantic-search assets under `dist/mediawiki/.../static/`
 
 ## Environment
 
@@ -83,6 +106,7 @@ Relevant keys:
 - `SCENE_WIKI_MAX_ARTICLES`
 - `SCENE_WIKI_MAX_ESTIMATED_INPUT_TOKENS`
 - `SCENE_WIKI_COST_SAMPLE_POSTS`
+- `SCENE_WIKI_EXTRACTION_OPENAI_MODEL`
 
 If `SUBSTACK_COOKIE` is set, the scraper will send it with requests so paid or subscriber-only posts can resolve when your session has access.
 
@@ -195,9 +219,27 @@ The platform runner also honors `SCENE_WIKI_MAX_ARTICLES`, and writes a per-job 
 - `src/scene_wiki/` — Python pipeline and CLI
 - `wiki/` — vendored Quartz app plus assistant sidebar customizations
 - `scripts/` — incremental build and Cloudflare deploy helpers
+- `examples/mediawiki/` — MediaWiki deployment and import scaffolding
+
+## MediaWiki Path
+
+The MediaWiki path exists for archives that are too large or too graph-heavy for the Quartz build.
+
+It produces:
+
+- article-style entity pages instead of just sparse stubs
+- issue pages from the source archive
+- category pages
+- a `mediawiki-import.xml` file suitable for `importDump.php`
+- AlphaLoop-style semantic search assets as static sidecars
+
+See:
+
+- [MediaWiki export README](/Users/ryanprendergast/Documents/Zenobia%20Pay/scene-wiki/examples/mediawiki/README.md)
+- [MediaWiki Compose stack](/Users/ryanprendergast/Documents/Zenobia%20Pay/scene-wiki/examples/mediawiki/docker-compose.yml)
 
 ## Current Constraints
 
-- The extraction pass currently uses the local `claude` CLI for newsletter entity extraction.
+- The public Scene Wiki platform still deploys the Quartz path; the MediaWiki path is currently a CLI/export workflow.
 - The semantic search index currently uses Gemini embeddings.
-- The scraper is tuned for Substack archive pages and may need adjustment for heavily customized publications.
+- The scraper handles Substack and generic publication archives, but may still need per-site tweaks for heavily customized sites.

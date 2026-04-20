@@ -22,13 +22,16 @@ class NewsletterEntity(BaseModel):
     name: str
     category: str = Field(
         description=(
-            "One of: person, venue, event, publication, instagram_account, "
-            "book, film, music, brand, place, concept, organization"
+            "One of: person, venue, event, publication, social_account, "
+            "book, essay, article, film, music, brand, place, concept, organization"
         )
     )
     evidence: str = Field(description="Short quote or context from the source text")
     aliases: list[str] = Field(default_factory=list)
     confidence: Optional[float] = None
+    platform: Optional[str] = None
+    handle: Optional[str] = None
+    work_type: Optional[str] = None
 
 
 class NewsletterExtractionBatch(BaseModel):
@@ -47,8 +50,10 @@ Categories (use exactly these):
 - venue: Restaurants, bars, cafes, galleries, cinemas, clubs, parks, shops, hotels, specific named locations
 - event: Specific named events, shows, readings, parties, screenings, runway shows, symposiums
 - publication: Magazines, zines, Substacks, literary journals, newspapers, blogs, newsletters
-- instagram_account: When an Instagram handle or account is referenced (by name or @mention)
-- book: Books, novels, poetry collections, essays, specific written works
+- social_account: A platform-specific account or handle when the source explicitly refers to it as an account/profile/handle
+- book: Books, novels, poetry collections, or book-length written works
+- essay: Essays, thinkpieces, manifestos, speeches, papers, and long-form standalone written works that are not books
+- article: Blog posts, interviews, transcripts, newsletter posts, and article-length written works
 - film: Films, documentaries, TV shows, specific screenings
 - music: Songs, albums, bands, musicians/artists referenced for their music
 - brand: Fashion brands, clothing labels, product brands
@@ -62,6 +67,9 @@ Rules:
 - If someone is both a person and a musician, categorize based on how they appear in context
 - Keep evidence short — just enough to show the context of the mention
 - Use the most specific category that fits
+- Use social_account only when the text explicitly frames something as a platform account/handle/profile.
+- Never infer Instagram from an @mention alone. Do not label X/Twitter, TikTok, or generic social handles as Instagram.
+- Use book only for book-length works. Do not label essays, interviews, transcripts, Substack posts, or articles as books.
 - Do NOT extract generic/common nouns or unnamed things
 
 Respond with ONLY a JSON object matching this schema, no other text:
@@ -72,7 +80,10 @@ Respond with ONLY a JSON object matching this schema, no other text:
       "category": "one of the categories above",
       "evidence": "short quote showing context",
       "aliases": ["optional", "alternate names"],
-      "confidence": 0.95
+      "confidence": 0.95,
+      "platform": "only for social_account",
+      "handle": "only for social_account",
+      "work_type": "only for book/essay/article when explicit"
     }
   ]
 }
@@ -94,6 +105,9 @@ class CorpusEntityAggregate(BaseModel):
     post_ids: list[str] = Field(default_factory=list)
     first_seen: Optional[str] = None
     last_seen: Optional[str] = None
+    platform: Optional[str] = None
+    handle: Optional[str] = None
+    work_type: Optional[str] = None
 
 
 def extract_newsletter_chunk_claude(
@@ -391,6 +405,9 @@ def aggregate_chunk_results(per_chunk_results: list[dict]) -> list[CorpusEntityA
                     "confidence_values": [],
                     "post_ids": set(),
                     "dates": [],
+                    "platform": entity.platform,
+                    "handle": entity.handle,
+                    "work_type": entity.work_type,
                 }
             record = grouped[key]
             if entity.evidence and entity.evidence not in record["evidence"]:
@@ -399,6 +416,12 @@ def aggregate_chunk_results(per_chunk_results: list[dict]) -> list[CorpusEntityA
                 record["aliases"].add(alias)
             if entity.confidence is not None:
                 record["confidence_values"].append(entity.confidence)
+            if entity.platform and not record.get("platform"):
+                record["platform"] = entity.platform
+            if entity.handle and not record.get("handle"):
+                record["handle"] = entity.handle
+            if entity.work_type and not record.get("work_type"):
+                record["work_type"] = entity.work_type
             record["post_ids"].add(doc_id)
             if published_at:
                 date_part = published_at.split("T")[0] if "T" in published_at else published_at
@@ -419,6 +442,9 @@ def aggregate_chunk_results(per_chunk_results: list[dict]) -> list[CorpusEntityA
                 post_ids=sorted(record["post_ids"]),
                 first_seen=dates[0] if dates else None,
                 last_seen=dates[-1] if dates else None,
+                platform=record.get("platform"),
+                handle=record.get("handle"),
+                work_type=record.get("work_type"),
             )
         )
     aggregated.sort(key=lambda e: (-e.mention_count, e.category, e.name.lower()))

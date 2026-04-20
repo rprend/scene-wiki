@@ -19,10 +19,13 @@ from .storage import read_json
 CATEGORY_TITLES = {
     "venue": "Venues",
     "instagram_account": "Instagram Accounts",
+    "social_account": "Social Accounts",
     "publication": "Publications",
     "organization": "Organizations",
     "person": "People",
     "book": "Books",
+    "essay": "Essays",
+    "article": "Articles",
     "film": "Films",
     "music": "Music",
     "place": "Places",
@@ -34,10 +37,13 @@ CATEGORY_TITLES = {
 CATEGORY_SINGULAR = {
     "venue": "venue",
     "instagram_account": "Instagram account",
+    "social_account": "social account",
     "publication": "publication",
     "organization": "organization",
     "person": "person",
     "book": "book",
+    "essay": "essay",
+    "article": "article",
     "film": "film",
     "music": "music project",
     "place": "place",
@@ -49,10 +55,13 @@ CATEGORY_SINGULAR = {
 CATEGORY_DESCRIPTIONS = {
     "venue": "Restaurants, galleries, cinemas, clubs, bars, and other places where this scene physically happens.",
     "instagram_account": "Accounts that organize, signal, or circulate information across the scene.",
+    "social_account": "Platform-specific accounts and handles that act as scene nodes or distribution surfaces.",
     "publication": "Substacks, magazines, zines, journals, and publications referenced in the archive.",
     "organization": "Groups, collectives, magazines, venues, and institutions operating inside the scene.",
     "person": "Writers, artists, hosts, DJs, filmmakers, and recurring characters across the archive.",
     "book": "Books, collections, and literary works mentioned in the writing.",
+    "essay": "Essays, speeches, and other standalone written works that are not books.",
+    "article": "Articles, interviews, transcripts, posts, and other publication-length written works.",
     "film": "Films, screenings, and moving-image works that recur in the archive.",
     "music": "Bands, songs, albums, and musical projects referenced in the archive.",
     "place": "Cities, neighborhoods, regions, and other geographic anchors.",
@@ -406,6 +415,14 @@ def _entity_search_terms(entity: dict[str, Any]) -> list[str]:
     if entity.get("instagram_handle"):
         raw_terms.append(entity["instagram_handle"])
         raw_terms.append(f"@{entity['instagram_handle']}")
+    if entity.get("handle"):
+        raw_terms.append(entity["handle"])
+        raw_terms.append(f"@{entity['handle']}")
+    for profile in entity.get("social_profiles", []):
+        handle = profile.get("handle")
+        if handle:
+            raw_terms.append(handle)
+            raw_terms.append(f"@{handle}")
     terms = []
     for term in raw_terms:
         clean = term.strip()
@@ -690,6 +707,14 @@ def _external_link_values(entity: dict[str, Any]) -> list[str]:
     links: list[str] = []
     if entity.get("instagram_handle"):
         links.append(f"Instagram: https://instagram.com/{entity['instagram_handle']}")
+    elif entity.get("platform") and entity.get("handle"):
+        links.append(f"{str(entity['platform']).title()}: @{entity['handle']}")
+    for profile in entity.get("social_profiles", [])[:8]:
+        platform = profile.get("platform")
+        handle = profile.get("handle")
+        url = profile.get("url")
+        if platform and handle and url:
+            links.append(f"{str(platform).title()}: {url}")
     for url in entity.get("urls", [])[:12]:
         links.append(url)
     return _dedupe(links)
