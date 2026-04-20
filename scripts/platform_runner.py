@@ -621,7 +621,7 @@ def add_custom_domain(project_name: str, domain_name: str) -> None:
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", "replace")
-        if "already exists" in body.lower():
+        if "already exists" in body.lower() or "already added" in body.lower():
             return
         raise RuntimeError(f"Attaching custom domain failed: {exc.code} {body}") from exc
     if not payload.get("success", False):
