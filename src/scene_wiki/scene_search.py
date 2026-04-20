@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import time
 from collections import Counter
@@ -38,8 +39,11 @@ MAX_CHUNK_CHARS = 1800
 MAX_CHUNK_ENTITIES = 8
 MAX_ENTITY_BACKLINKS = 6
 MAX_ENTITY_CONTEXTS = 6
-MAX_EMBED_RETRIES = 6
+MAX_EMBED_RETRIES = 10
 SEARCH_INDEX_SHARD_TARGET_BYTES = 12 * 1024 * 1024
+DEFAULT_EMBED_BATCH_SIZE = 24
+DEFAULT_EMBED_REQUEST_DELAY_SECONDS = 1.0
+MAX_EMBED_RETRY_DELAY_SECONDS = 120.0
 
 
 def _google_api_key() -> str:
@@ -57,6 +61,26 @@ def _cosine_norm(values: list[float]) -> float:
 def _normalize_embedding(values: list[float]) -> list[float]:
     norm = _cosine_norm(values) or 1.0
     return [round(value / norm, 6) for value in values]
+
+
+def _search_embedding_batch_size() -> int:
+    raw = os.getenv("SCENE_WIKI_SEARCH_EMBED_BATCH_SIZE", "").strip()
+    if not raw:
+        return DEFAULT_EMBED_BATCH_SIZE
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return DEFAULT_EMBED_BATCH_SIZE
+
+
+def _search_embed_request_delay_seconds() -> float:
+    raw = os.getenv("SCENE_WIKI_SEARCH_EMBED_REQUEST_DELAY_SECONDS", "").strip()
+    if not raw:
+        return DEFAULT_EMBED_REQUEST_DELAY_SECONDS
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return DEFAULT_EMBED_REQUEST_DELAY_SECONDS
 
 
 def _embed_text_batch(texts: list[str], *, task_type: str, api_key: str) -> list[list[float]]:
@@ -96,7 +120,13 @@ def _embed_text_batch(texts: list[str], *, task_type: str, api_key: str) -> list
                 delay = float(retry_after) if retry_after else 2**attempt
             except ValueError:
                 delay = 2**attempt
-            time.sleep(min(delay, 30.0))
+            delay = min(delay, MAX_EMBED_RETRY_DELAY_SECONDS)
+            print(
+                f"Search embedding rate limited for batch of {len(texts)}; retrying in {round(delay, 1)}s "
+                f"(attempt {attempt + 1}/{MAX_EMBED_RETRIES}).",
+                flush=True,
+            )
+            time.sleep(delay)
 
         if response is None:
             raise RuntimeError("Embedding request did not produce a response.")
@@ -114,6 +144,45 @@ def _embed_text_batch(texts: list[str], *, task_type: str, api_key: str) -> list
             raise RuntimeError("Embedding response was missing vector values.")
         embeddings.append(_normalize_embedding([float(value) for value in values]))
     return embeddings
+
+
+def _search_embedding_cache_dir(run_dir: Path) -> Path:
+    cache_dir = run_dir / "artifacts" / "search-embedding-batches"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
+
+
+def _search_embedding_cache_path(cache_dir: Path, start: int, end: int) -> Path:
+    return cache_dir / f"batch-{start:05d}-{end:05d}.json"
+
+
+def _load_cached_search_embedding_batch(cache_path: Path, *, expected_chunk_ids: list[str]) -> list[list[float]] | None:
+    if not cache_path.exists():
+        return None
+    try:
+        payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    if payload.get("chunk_ids") != expected_chunk_ids:
+        return None
+    embeddings = payload.get("embeddings")
+    if not isinstance(embeddings, list) or len(embeddings) != len(expected_chunk_ids):
+        return None
+    return embeddings
+
+
+def _write_cached_search_embedding_batch(cache_path: Path, *, chunk_ids: list[str], embeddings: list[list[float]]) -> None:
+    cache_path.write_text(
+        json.dumps(
+            {
+                "chunk_ids": chunk_ids,
+                "embeddings": embeddings,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+        encoding="utf-8",
+    )
 
 
 def _split_primary_blocks(text: str) -> list[str]:
@@ -273,10 +342,35 @@ def build_scene_search_assets(run_dir: Path, output_dir: Path) -> dict[str, Any]
     api_key = _google_api_key()
     primary_texts = [chunk["primary_text"] for chunk in chunks]
     embeddings: list[list[float]] = []
-    batch_size = 96
+    batch_size = _search_embedding_batch_size()
+    request_delay_seconds = _search_embed_request_delay_seconds()
+    cache_dir = _search_embedding_cache_dir(run_dir)
+    total_batches = math.ceil(len(primary_texts) / batch_size)
     for start in range(0, len(primary_texts), batch_size):
         batch = primary_texts[start : start + batch_size]
-        embeddings.extend(_embed_text_batch(batch, task_type=DOCUMENT_TASK_TYPE, api_key=api_key))
+        end = min(start + batch_size, len(primary_texts))
+        batch_index = start // batch_size + 1
+        batch_chunk_ids = [chunk["chunk_id"] for chunk in chunks[start:end]]
+        cache_path = _search_embedding_cache_path(cache_dir, start, end)
+        cached_batch = _load_cached_search_embedding_batch(cache_path, expected_chunk_ids=batch_chunk_ids)
+        if cached_batch is not None:
+            print(
+                f"Reusing cached search embedding batch {batch_index}/{total_batches} "
+                f"({len(cached_batch)} chunks).",
+                flush=True,
+            )
+            embeddings.extend(cached_batch)
+            continue
+
+        print(
+            f"Embedding search batch {batch_index}/{total_batches} ({len(batch)} chunks).",
+            flush=True,
+        )
+        batch_embeddings = _embed_text_batch(batch, task_type=DOCUMENT_TASK_TYPE, api_key=api_key)
+        _write_cached_search_embedding_batch(cache_path, chunk_ids=batch_chunk_ids, embeddings=batch_embeddings)
+        embeddings.extend(batch_embeddings)
+        if request_delay_seconds > 0 and batch_index < total_batches:
+            time.sleep(request_delay_seconds)
 
     if len(chunks) != len(embeddings):
         raise RuntimeError(f"Embedding count mismatch: expected {len(chunks)}, got {len(embeddings)}")
