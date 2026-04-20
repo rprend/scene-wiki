@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from openai import OpenAI
 
 from .config import get_settings
 from .scene_wiki import _clean_text
@@ -25,14 +26,10 @@ from .scene_wiki import build_entity_note_paths
 from .scene_wiki import load_scene_corpus
 
 
-EMBEDDING_MODEL = "gemini-embedding-2-preview"
-EMBEDDING_DIMENSIONS = 768
-DOCUMENT_TASK_TYPE = "RETRIEVAL_DOCUMENT"
-QUERY_TASK_TYPE = "RETRIEVAL_QUERY"
-GOOGLE_EMBED_ENDPOINT = (
-    "https://generativelanguage.googleapis.com/v1beta/models/"
-    f"{EMBEDDING_MODEL}:batchEmbedContents"
-)
+EMBEDDING_MODEL = "text-embedding-3-small"
+EMBEDDING_DIMENSIONS = 1536
+DOCUMENT_TASK_TYPE = "search_document"
+QUERY_TASK_TYPE = "search_query"
 MIN_BLOCK_CHARS = 120
 TARGET_CHUNK_CHARS = 1350
 MAX_CHUNK_CHARS = 1800
@@ -46,11 +43,11 @@ DEFAULT_EMBED_REQUEST_DELAY_SECONDS = 1.0
 MAX_EMBED_RETRY_DELAY_SECONDS = 120.0
 
 
-def _google_api_key() -> str:
+def _openai_api_key() -> str:
     settings = get_settings()
-    api_key = settings.google_api_key or settings.gemini_api_key
+    api_key = settings.openai_api_key
     if not api_key:
-        raise RuntimeError("Set GOOGLE_API_KEY or GEMINI_API_KEY to build the scene search index.")
+        raise RuntimeError("Set OPENAI_API_KEY to build the scene search index.")
     return api_key
 
 
@@ -87,40 +84,21 @@ def _embed_text_batch(texts: list[str], *, task_type: str, api_key: str) -> list
     if not texts:
         return []
 
-    requests = [
-        {
-            "model": f"models/{EMBEDDING_MODEL}",
-            "content": {"parts": [{"text": text}]},
-            "taskType": task_type,
-            "outputDimensionality": EMBEDDING_DIMENSIONS,
-            "title": f"scene-search-{index}",
-        }
-        for index, text in enumerate(texts)
-    ]
-
-    with httpx.Client(timeout=120.0) as client:
-        response: httpx.Response | None = None
-        for attempt in range(MAX_EMBED_RETRIES):
-            response = client.post(
-                GOOGLE_EMBED_ENDPOINT,
-                headers={
-                    "content-type": "application/json",
-                    "x-goog-api-key": api_key,
-                },
-                json={"requests": requests},
+    client = OpenAI(api_key=api_key)
+    response = None
+    for attempt in range(MAX_EMBED_RETRIES):
+        try:
+            response = client.embeddings.create(
+                model=EMBEDDING_MODEL,
+                input=texts,
+                dimensions=EMBEDDING_DIMENSIONS,
             )
-            if response.status_code != 429:
-                break
-
-            if attempt == MAX_EMBED_RETRIES - 1:
-                response.raise_for_status()
-
-            retry_after = response.headers.get("retry-after")
-            try:
-                delay = float(retry_after) if retry_after else 2**attempt
-            except ValueError:
-                delay = 2**attempt
-            delay = min(delay, MAX_EMBED_RETRY_DELAY_SECONDS)
+            break
+        except Exception as exc:
+            status_code = getattr(exc, "status_code", None)
+            if status_code != 429 or attempt == MAX_EMBED_RETRIES - 1:
+                raise
+            delay = min(2**attempt, MAX_EMBED_RETRY_DELAY_SECONDS)
             print(
                 f"Search embedding rate limited for batch of {len(texts)}; retrying in {round(delay, 1)}s "
                 f"(attempt {attempt + 1}/{MAX_EMBED_RETRIES}).",
@@ -128,18 +106,15 @@ def _embed_text_batch(texts: list[str], *, task_type: str, api_key: str) -> list
             )
             time.sleep(delay)
 
-        if response is None:
-            raise RuntimeError("Embedding request did not produce a response.")
-        response.raise_for_status()
-        payload = response.json()
+    if response is None:
+        raise RuntimeError("Embedding request did not produce a response.")
 
-    responses = payload.get("embeddings", [])
-    if len(responses) != len(texts):
-        raise RuntimeError(f"Embedding count mismatch: expected {len(texts)}, got {len(responses)}")
+    if len(response.data) != len(texts):
+        raise RuntimeError(f"Embedding count mismatch: expected {len(texts)}, got {len(response.data)}")
 
     embeddings: list[list[float]] = []
-    for item in responses:
-        values = item.get("values", [])
+    for item in response.data:
+        values = item.embedding
         if not values:
             raise RuntimeError("Embedding response was missing vector values.")
         embeddings.append(_normalize_embedding([float(value) for value in values]))
@@ -374,7 +349,7 @@ def build_scene_search_assets(run_dir: Path, output_dir: Path) -> dict[str, Any]
     if not chunks:
         raise RuntimeError("No searchable chunks were produced for the scene wiki.")
 
-    api_key = _google_api_key()
+    api_key = _openai_api_key()
     primary_texts = [chunk["primary_text"] for chunk in chunks]
     embeddings: list[list[float]] = []
     batch_size = _search_embedding_batch_size()

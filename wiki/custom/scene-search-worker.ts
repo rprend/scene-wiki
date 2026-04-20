@@ -1,4 +1,4 @@
-import { createGoogleGenerativeAI } from "@ai-sdk/google"
+import { createOpenAI } from "@ai-sdk/openai"
 import { createAlphaloopHandler } from "alphaloop/handler"
 
 type SearchEntity = {
@@ -51,11 +51,11 @@ type Env = {
   ASSETS: {
     fetch(input: Request | URL | string): Promise<Response>
   }
-  GEMINI_API_KEY?: string
-  GOOGLE_API_KEY?: string
+  OPENAI_API_KEY?: string
 }
 
-const SEARCH_MODEL = "gemini-2.5-flash"
+const SEARCH_MODEL = "gpt-4.1-mini"
+const EMBEDDING_MODEL = "text-embedding-3-small"
 const MAX_CONTEXT_ENTITIES = 4
 const MAX_RELATED_PAGES = 12
 
@@ -73,9 +73,9 @@ function getSearchBasePath(request: Request): string {
 }
 
 function getApiKey(env: Env): string {
-  const apiKey = env.GOOGLE_API_KEY || env.GEMINI_API_KEY
+  const apiKey = env.OPENAI_API_KEY
   if (!apiKey) {
-    throw new Error("GOOGLE_API_KEY or GEMINI_API_KEY is not configured for semantic search.")
+    throw new Error("OPENAI_API_KEY is not configured for semantic search.")
   }
   return apiKey
 }
@@ -203,20 +203,17 @@ function normalizeVector(values: number[]): number[] {
 async function embedQuery(query: string, env: Env, index: SearchIndex): Promise<number[]> {
   const apiKey = getApiKey(env)
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${index.meta.model}:embedContent`,
+    "https://api.openai.com/v1/embeddings",
     {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-goog-api-key": apiKey,
+        authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: `models/${index.meta.model}`,
-        content: {
-          parts: [{ text: query }],
-        },
-        taskType: index.meta.query_task_type,
-        outputDimensionality: index.meta.dimensions,
+        model: index.meta.model || EMBEDDING_MODEL,
+        input: query,
+        dimensions: index.meta.dimensions,
       }),
     },
   )
@@ -226,7 +223,7 @@ async function embedQuery(query: string, env: Env, index: SearchIndex): Promise<
   }
 
   const payload = await response.json()
-  const values = payload?.embedding?.values
+  const values = payload?.data?.[0]?.embedding
   if (!Array.isArray(values) || values.length === 0) {
     throw new Error("Query embedding response was missing vector values.")
   }
@@ -361,7 +358,7 @@ export default {
       return env.ASSETS.fetch(request)
     }
 
-    const provider = createGoogleGenerativeAI({ apiKey: getApiKey(env) })
+    const provider = createOpenAI({ apiKey: getApiKey(env) })
     const handler = createAlphaloopHandler({
       model: provider(SEARCH_MODEL),
       rerankModel: provider(SEARCH_MODEL),

@@ -34,7 +34,7 @@ The platform layer adds:
 - Node.js 20+
 - `npm`
 - `claude` CLI authenticated locally for Claude-based extraction, or an `OPENAI_API_KEY` for OpenAI extraction
-- `GOOGLE_API_KEY` or `GEMINI_API_KEY` for search embeddings
+- `OPENAI_API_KEY` for extraction and semantic-search embeddings
 - `CLOUDFLARE_ACCOUNT_ID` for deploys
 - `CLOUDFLARE_API_TOKEN` for Pages domain attachment in the platform runner
 
@@ -92,8 +92,7 @@ The generator reads `.env`, `.dev.vars`, and shell environment variables.
 Relevant keys:
 
 - `OPENAI_API_KEY`
-- `GOOGLE_API_KEY`
-- `GEMINI_API_KEY`
+- `OPENAI_API_KEY`
 - `SUBSTACK_COOKIE`
 - `SCENE_WIKI_TITLE`
 - `SCENE_WIKI_ARCHIVE_LABEL`
@@ -241,5 +240,5 @@ See:
 ## Current Constraints
 
 - The public Scene Wiki platform still deploys the Quartz path; the MediaWiki path is currently a CLI/export workflow.
-- The semantic search index currently uses Gemini embeddings.
+- The semantic search index now uses OpenAI embeddings.
 - The scraper handles Substack and generic publication archives, but may still need per-site tweaks for heavily customized sites.
