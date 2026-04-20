@@ -192,6 +192,34 @@ def wait_for_custom_domain(domain_name: str, *, timeout_seconds: int = 600, poll
     return False
 
 
+def try_activate_custom_domain(
+    *,
+    base_url: str,
+    job_id: str,
+    project_name: str,
+    custom_domain: str,
+) -> bool:
+    log_event(base_url, job_id, "Activating subdomain.", payload={"stage": "domain", "overallProgressPct": 99})
+    add_custom_domain(project_name, custom_domain)
+    if wait_for_custom_domain(custom_domain):
+        log_event(
+            base_url,
+            job_id,
+            "Subdomain is live.",
+            payload={"stage": "domain", "overallProgressPct": 100, "customDomain": custom_domain},
+        )
+        return True
+
+    log_event(
+        base_url,
+        job_id,
+        "Subdomain is still pending in DNS. Using Pages URL for now.",
+        level="warning",
+        payload={"stage": "domain", "customDomain": custom_domain},
+    )
+    return False
+
+
 class BuildProgressTracker:
     def __init__(self, *, base_url: str, job_id: str, start_time: float) -> None:
         self.base_url = base_url
@@ -697,15 +725,11 @@ def handle_job(base_url: str, job: dict, workdir: Path) -> None:
         deploy_pages(project_name, output_dir, workdir, log_path)
 
         heartbeat(base_url, job["id"], "")
-        log_event(base_url, job["id"], "Activating subdomain.", payload={"stage": "domain", "overallProgressPct": 99})
-        add_custom_domain(project_name, custom_domain)
-        if not wait_for_custom_domain(custom_domain):
-            raise RuntimeError(f"Subdomain did not become reachable in time: https://{custom_domain}")
-        log_event(
-            base_url,
-            job["id"],
-            "Subdomain is live.",
-            payload={"stage": "domain", "overallProgressPct": 100, "customDomain": custom_domain},
+        custom_domain_live = try_activate_custom_domain(
+            base_url=base_url,
+            job_id=job["id"],
+            project_name=project_name,
+            custom_domain=custom_domain,
         )
 
         api_request(
@@ -715,7 +739,7 @@ def handle_job(base_url: str, job: dict, workdir: Path) -> None:
             payload={
                 "pagesProjectName": project_name,
                 "pagesUrl": pages_url,
-                "customDomain": custom_domain,
+                "customDomain": custom_domain if custom_domain_live else None,
                 "runDir": actual_run_dir,
                 "title": job.get("title"),
             },
