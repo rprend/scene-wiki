@@ -19,6 +19,7 @@ MODEL_PRICING_USD_PER_MILLION: dict[str, tuple[float, float]] = {
     "gpt-5.4-mini": (0.75, 3.00),
     "gpt-5.4": (2.00, 8.00),
     "text-embedding-3-small": (0.02, 0.0),
+    "text-embedding-3-large": (0.13, 0.0),
 }
 
 

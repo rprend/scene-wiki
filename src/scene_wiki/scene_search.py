@@ -27,8 +27,10 @@ from .scene_wiki import build_entity_note_paths
 from .scene_wiki import load_scene_corpus
 
 
-EMBEDDING_MODEL = "text-embedding-3-small"
-EMBEDDING_DIMENSIONS = 1536
+DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
+DEFAULT_EMBEDDING_DIMENSIONS = 1536
+LARGE_EMBEDDING_MODEL = "text-embedding-3-large"
+LARGE_EMBEDDING_DIMENSIONS = 3072
 DOCUMENT_TASK_TYPE = "search_document"
 QUERY_TASK_TYPE = "search_query"
 MIN_BLOCK_CHARS = 120
@@ -51,6 +53,23 @@ def _openai_api_key() -> str:
     if not api_key:
         raise RuntimeError("Set OPENAI_API_KEY to build the scene search index.")
     return api_key
+
+
+def _embedding_model() -> str:
+    raw = os.getenv("SCENE_WIKI_SEARCH_EMBEDDING_MODEL", "").strip()
+    return raw or DEFAULT_EMBEDDING_MODEL
+
+
+def _embedding_dimensions(model: str) -> int:
+    raw = os.getenv("SCENE_WIKI_SEARCH_EMBEDDING_DIMENSIONS", "").strip()
+    if raw:
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            pass
+    if model == LARGE_EMBEDDING_MODEL:
+        return LARGE_EMBEDDING_DIMENSIONS
+    return DEFAULT_EMBEDDING_DIMENSIONS
 
 
 def _cosine_norm(values: list[float]) -> float:
@@ -86,14 +105,16 @@ def _embed_text_batch(texts: list[str], *, task_type: str, api_key: str) -> list
     if not texts:
         return []
 
+    embedding_model = _embedding_model()
+    embedding_dimensions = _embedding_dimensions(embedding_model)
     client = OpenAI(api_key=api_key, timeout=OPENAI_REQUEST_TIMEOUT_SECONDS, max_retries=2)
     response = None
     for attempt in range(MAX_EMBED_RETRIES):
         try:
             response = client.embeddings.create(
-                model=EMBEDDING_MODEL,
+                model=embedding_model,
                 input=texts,
-                dimensions=EMBEDDING_DIMENSIONS,
+                dimensions=embedding_dimensions,
             )
             break
         except Exception as exc:
@@ -118,8 +139,8 @@ def _embed_text_batch(texts: list[str], *, task_type: str, api_key: str) -> list
     prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
     total_tokens = int(getattr(usage, "total_tokens", prompt_tokens) or prompt_tokens)
     record_openai_usage(
-        requested_model=EMBEDDING_MODEL,
-        resolved_model=getattr(response, "model", None) or EMBEDDING_MODEL,
+        requested_model=embedding_model,
+        resolved_model=getattr(response, "model", None) or embedding_model,
         response_id=getattr(response, "id", None),
         input_tokens=prompt_tokens,
         output_tokens=0,
@@ -333,6 +354,8 @@ def build_scene_search_assets(run_dir: Path, output_dir: Path) -> dict[str, Any]
     run_dir = run_dir.resolve()
     output_dir = output_dir.resolve()
     _clear_existing_search_assets(output_dir)
+    embedding_model = _embedding_model()
+    embedding_dimensions = _embedding_dimensions(embedding_model)
 
     docs, entities = load_scene_corpus(run_dir)
     entity_note_paths = build_entity_note_paths(entities)
@@ -460,7 +483,7 @@ def build_scene_search_assets(run_dir: Path, output_dir: Path) -> dict[str, Any]
     search_index = {
         "meta": {
             "model": EMBEDDING_MODEL,
-            "dimensions": EMBEDDING_DIMENSIONS,
+            "dimensions": embedding_dimensions,
             "document_task_type": DOCUMENT_TASK_TYPE,
             "query_task_type": QUERY_TASK_TYPE,
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -522,6 +545,6 @@ def build_scene_search_assets(run_dir: Path, output_dir: Path) -> dict[str, Any]
         "output_dir": str(output_dir),
         "chunk_count": len(chunks),
         "chunk_shard_count": len(chunk_shards),
-        "embedding_model": EMBEDDING_MODEL,
+        "embedding_model": embedding_model,
         "usage_dir": str(usage_dir),
     }
