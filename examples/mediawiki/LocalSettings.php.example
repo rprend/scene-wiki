@@ -12,6 +12,9 @@ $wgDBname = "__DB_NAME__";
 $wgDBuser = "__DB_USER__";
 $wgDBpassword = "__DB_PASSWORD__";
 
+wfLoadSkin( 'Vector' );
+$wgDefaultSkin = 'vector';
+
 $wgEnableUploads = true;
 $wgFileExtensions = [ 'png', 'gif', 'jpg', 'jpeg', 'webp', 'svg' ];
 
