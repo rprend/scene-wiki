@@ -16,7 +16,6 @@ from openai import OpenAI
 
 from .config import get_settings
 from .openai_usage import record_openai_usage
-from .openai_usage import reset_usage_summary
 from .scene_wiki import _clean_text
 from .scene_wiki import _entity_blurb
 from .scene_wiki import _entity_search_terms
@@ -43,6 +42,7 @@ SEARCH_INDEX_SHARD_TARGET_BYTES = 12 * 1024 * 1024
 DEFAULT_EMBED_BATCH_SIZE = 24
 DEFAULT_EMBED_REQUEST_DELAY_SECONDS = 1.0
 MAX_EMBED_RETRY_DELAY_SECONDS = 120.0
+OPENAI_REQUEST_TIMEOUT_SECONDS = 90.0
 
 
 def _openai_api_key() -> str:
@@ -86,7 +86,7 @@ def _embed_text_batch(texts: list[str], *, task_type: str, api_key: str) -> list
     if not texts:
         return []
 
-    client = OpenAI(api_key=api_key)
+    client = OpenAI(api_key=api_key, timeout=OPENAI_REQUEST_TIMEOUT_SECONDS, max_retries=2)
     response = None
     for attempt in range(MAX_EMBED_RETRIES):
         try:
@@ -373,7 +373,6 @@ def build_scene_search_assets(run_dir: Path, output_dir: Path) -> dict[str, Any]
     usage_dir.mkdir(parents=True, exist_ok=True)
     previous_usage_dir = os.environ.get("SCENE_WIKI_AI_USAGE_DIR")
     os.environ["SCENE_WIKI_AI_USAGE_DIR"] = str(usage_dir)
-    reset_usage_summary()
     primary_texts = [chunk["primary_text"] for chunk in chunks]
     embeddings: list[list[float]] = []
     batch_size = _search_embedding_batch_size()

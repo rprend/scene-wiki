@@ -63,7 +63,33 @@ def _dir_key(usage_dir: Path) -> str:
 
 
 def _summary_for_dir(usage_dir: Path) -> dict[str, dict[str, Any]]:
-    return _SUMMARY_BY_DIR.setdefault(_dir_key(usage_dir), {})
+    key = _dir_key(usage_dir)
+    existing = _SUMMARY_BY_DIR.get(key)
+    if existing is not None:
+        return existing
+    summary_path = _summary_path(usage_dir)
+    if summary_path.exists():
+        try:
+            payload = json.loads(summary_path.read_text(encoding="utf-8"))
+            models = payload.get("models", {})
+            if isinstance(models, dict):
+                normalized = {
+                    str(model): {
+                        "calls": int(values.get("calls", 0)),
+                        "inputTokens": int(values.get("inputTokens", 0)),
+                        "outputTokens": int(values.get("outputTokens", 0)),
+                        "totalTokens": int(values.get("totalTokens", 0)),
+                        "estimatedCostUsd": float(values.get("estimatedCostUsd", 0.0)),
+                    }
+                    for model, values in models.items()
+                    if isinstance(values, dict)
+                }
+                _SUMMARY_BY_DIR[key] = normalized
+                return normalized
+        except Exception:
+            pass
+    _SUMMARY_BY_DIR[key] = {}
+    return _SUMMARY_BY_DIR[key]
 
 
 def _totals_for_summary(summary: dict[str, dict[str, Any]]) -> dict[str, Any]:

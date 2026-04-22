@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import time
 from collections import Counter
 from collections import defaultdict
 from dataclasses import dataclass
@@ -17,7 +18,6 @@ from openai import OpenAI
 from .config import get_settings
 from .openai_usage import merge_usage_summaries
 from .openai_usage import record_openai_usage
-from .openai_usage import reset_usage_summary
 from .scene_search import build_scene_search_assets
 from .scene_wiki import CATEGORY_DESCRIPTIONS
 from .scene_wiki import CATEGORY_TITLES
@@ -104,6 +104,8 @@ DEFAULT_ENTITY_ARTICLE_MODEL = "gpt-4.1-mini"
 ENTITY_ARTICLE_MAX_DOC_CHARS = 1600
 ENTITY_ARTICLE_MAX_EVIDENCE = 6
 ENTITY_ARTICLE_PROMPT_VERSION = "v3"
+ENTITY_ARTICLE_REQUEST_TIMEOUT_SECONDS = 90.0
+ENTITY_ARTICLE_MAX_RETRIES = 5
 
 
 def _sanitize_title(value: str) -> str:
@@ -411,12 +413,32 @@ def _synthesize_entity_article(
     previous_usage_dir = os.environ.get("SCENE_WIKI_AI_USAGE_DIR")
     os.environ["SCENE_WIKI_AI_USAGE_DIR"] = str(usage_dir)
     try:
-        client = OpenAI(api_key=api_key)
-        response = client.responses.create(
-            model=model,
-            input=prompt,
-            max_output_tokens=900,
-        )
+        response = None
+        for attempt in range(ENTITY_ARTICLE_MAX_RETRIES):
+            try:
+                client = OpenAI(
+                    api_key=api_key,
+                    timeout=ENTITY_ARTICLE_REQUEST_TIMEOUT_SECONDS,
+                    max_retries=2,
+                )
+                response = client.responses.create(
+                    model=model,
+                    input=prompt,
+                    max_output_tokens=900,
+                )
+                break
+            except Exception as exc:
+                if attempt == ENTITY_ARTICLE_MAX_RETRIES - 1:
+                    raise
+                delay = min(2**attempt, 30)
+                print(
+                    f"Retrying MediaWiki article for {entity.get('name', 'entity')} after "
+                    f"{type(exc).__name__}: waiting {delay}s (attempt {attempt + 2}/{ENTITY_ARTICLE_MAX_RETRIES}).",
+                    flush=True,
+                )
+                time.sleep(delay)
+        if response is None:
+            raise RuntimeError(f"No response received for entity article {entity.get('name', 'entity')}.")
         usage = getattr(response, "usage", None)
         record_openai_usage(
             requested_model=model,
@@ -755,7 +777,6 @@ def build_mediawiki_export(
     resolved_site_title = site_title or json.loads((run_dir / "metadata.json").read_text(encoding="utf-8")).get("subject") or "Scene Wiki"
     previous_usage_dir = os.environ.get("SCENE_WIKI_AI_USAGE_DIR")
     os.environ["SCENE_WIKI_AI_USAGE_DIR"] = str(_entity_article_usage_dir(run_dir))
-    reset_usage_summary()
     pages.append(
         MediaWikiPage(
             title="Main Page",
