@@ -297,6 +297,113 @@ def parse_feed(xml_text: str) -> tuple[str | None, list[dict[str, Any]]]:
     return None, []
 
 
+def sitemap_candidate_urls(source_url: str) -> list[str]:
+    parsed = urlparse(source_url)
+    base_root = f"{parsed.scheme}://{parsed.netloc}"
+    return [
+        urljoin(base_root, "/wp-sitemap.xml"),
+        urljoin(base_root, "/sitemap.xml"),
+        urljoin(base_root, "/sitemap_index.xml"),
+    ]
+
+
+def _local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def _sitemap_title_from_path(path: str) -> str:
+    segment = path.rstrip("/").split("/")[-1]
+    return normalize_publication_title(segment.replace("-", " ").replace("_", " ").strip().title())
+
+
+def discover_sitemap_posts(
+    client: httpx.Client,
+    source_url: str,
+    *,
+    max_posts: int | None = None,
+) -> list[dict[str, Any]]:
+    parsed_source = urlparse(source_url)
+    source_path = parsed_source.path.rstrip("/")
+    seen_sitemaps: set[str] = set()
+    queue = list(sitemap_candidate_urls(source_url))
+    seen_links: set[str] = set()
+    collected: list[dict[str, Any]] = []
+
+    while queue:
+        sitemap_url = queue.pop(0)
+        if sitemap_url in seen_sitemaps:
+            continue
+        seen_sitemaps.add(sitemap_url)
+        try:
+            response = client.get(sitemap_url)
+            response.raise_for_status()
+            root = ET.fromstring(response.text)
+        except Exception:
+            continue
+
+        root_name = _local_name(root.tag).lower()
+        if root_name == "sitemapindex":
+            for sitemap_node in root:
+                if _local_name(sitemap_node.tag).lower() != "sitemap":
+                    continue
+                loc = None
+                for child in sitemap_node:
+                    if _local_name(child.tag).lower() == "loc":
+                        loc = (child.text or "").strip()
+                        break
+                if not loc:
+                    continue
+                parsed_loc = urlparse(loc)
+                if parsed_loc.netloc != parsed_source.netloc:
+                    continue
+                if loc not in seen_sitemaps and loc not in queue:
+                    queue.append(loc)
+            continue
+
+        if root_name != "urlset":
+            continue
+
+        for url_node in root:
+            if _local_name(url_node.tag).lower() != "url":
+                continue
+            loc = None
+            lastmod = None
+            for child in url_node:
+                child_name = _local_name(child.tag).lower()
+                if child_name == "loc":
+                    loc = (child.text or "").strip()
+                elif child_name == "lastmod":
+                    lastmod = (child.text or "").strip() or None
+            if not loc:
+                continue
+            parsed_loc = urlparse(loc)
+            if parsed_loc.netloc != parsed_source.netloc:
+                continue
+            path = parsed_loc.path.rstrip("/")
+            if not path or path == source_path:
+                continue
+            if source_path and not path.startswith(f"{source_path}/"):
+                continue
+            suffix = path[len(source_path) + 1 :] if source_path else path.lstrip("/")
+            if not suffix or "/" in suffix:
+                continue
+            normalized = f"{parsed_loc.scheme}://{parsed_loc.netloc}{parsed_loc.path}"
+            if normalized in seen_links:
+                continue
+            seen_links.add(normalized)
+            collected.append(
+                {
+                    "title": _sitemap_title_from_path(path),
+                    "link": normalized,
+                    "published_at": lastmod,
+                }
+            )
+            if max_posts is not None and len(collected) >= max_posts:
+                return collected
+
+    return collected
+
+
 def _parse_feed_datetime(value: str | None) -> str | None:
     if not value:
         return None
@@ -337,6 +444,8 @@ def discover_publication(
             continue
 
     archive_posts = discover_archive_posts(client, source_url, max_posts=24)
+    if len(archive_posts) < 3:
+        archive_posts = discover_sitemap_posts(client, source_url, max_posts=24)
     if len(archive_posts) > len(best_feed_items):
         sample_posts = archive_posts
     else:
@@ -475,6 +584,8 @@ def scrape_generic_publication(
         discovery = discover_publication(client, source_url)
         subject_name = subject or infer_publication_subject(source_url, discovery["title"])
         archive_posts = discover_archive_posts(client, source_url, max_posts=max_articles)
+        if not archive_posts:
+            archive_posts = discover_sitemap_posts(client, source_url, max_posts=max_articles)
         if not archive_posts and discovery["feedUrl"]:
             archive_posts = discovery["samplePosts"]
         if not archive_posts:

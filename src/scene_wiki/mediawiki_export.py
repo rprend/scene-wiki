@@ -15,7 +15,9 @@ from xml.sax.saxutils import escape
 from openai import OpenAI
 
 from .config import get_settings
+from .openai_usage import merge_usage_summaries
 from .openai_usage import record_openai_usage
+from .openai_usage import reset_usage_summary
 from .scene_search import build_scene_search_assets
 from .scene_wiki import CATEGORY_DESCRIPTIONS
 from .scene_wiki import CATEGORY_TITLES
@@ -156,6 +158,19 @@ def _entity_article_usage_dir(run_dir: Path) -> Path:
     usage_dir = run_dir / "artifacts" / "mediawiki-article-usage"
     usage_dir.mkdir(parents=True, exist_ok=True)
     return usage_dir
+
+
+def _write_ai_usage_report(run_dir: Path) -> dict[str, Any]:
+    summary_paths = [
+        run_dir / "artifacts" / "openai-usage" / "summary.json",
+        run_dir / "artifacts" / "mediawiki-article-usage" / "summary.json",
+        run_dir / "artifacts" / "search-embedding-usage" / "summary.json",
+    ]
+    report = merge_usage_summaries(*summary_paths)
+    report["sources"] = [str(path) for path in summary_paths if path.exists()]
+    output_path = run_dir / "artifacts" / "ai-usage-report.json"
+    output_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    return report
 
 
 def _entity_article_should_use_ai(entity: dict[str, Any], issue_ids: list[str]) -> bool:
@@ -738,6 +753,9 @@ def build_mediawiki_export(
     category_buckets: dict[str, list[int]] = defaultdict(list)
 
     resolved_site_title = site_title or json.loads((run_dir / "metadata.json").read_text(encoding="utf-8")).get("subject") or "Scene Wiki"
+    previous_usage_dir = os.environ.get("SCENE_WIKI_AI_USAGE_DIR")
+    os.environ["SCENE_WIKI_AI_USAGE_DIR"] = str(_entity_article_usage_dir(run_dir))
+    reset_usage_summary()
     pages.append(
         MediaWikiPage(
             title="Main Page",
@@ -766,24 +784,30 @@ def build_mediawiki_export(
             )
         )
 
-    for entity_id, entity in enumerate(entities):
-        category = entity.get("category", "unknown")
-        category_buckets[category].append(entity_id)
-        pages.append(
-            MediaWikiPage(
-                title=entity_titles[entity_id],
-                text=_render_entity_page(
-                    run_dir=run_dir,
-                    entity_id=entity_id,
-                    entity=entity,
-                    docs=docs,
-                    issue_titles=issue_titles,
-                    related_counts=related_counts,
-                    entities=entities,
-                    entity_titles=entity_titles,
-                ),
+    try:
+        for entity_id, entity in enumerate(entities):
+            category = entity.get("category", "unknown")
+            category_buckets[category].append(entity_id)
+            pages.append(
+                MediaWikiPage(
+                    title=entity_titles[entity_id],
+                    text=_render_entity_page(
+                        run_dir=run_dir,
+                        entity_id=entity_id,
+                        entity=entity,
+                        docs=docs,
+                        issue_titles=issue_titles,
+                        related_counts=related_counts,
+                        entities=entities,
+                        entity_titles=entity_titles,
+                    ),
+                )
             )
-        )
+    finally:
+        if previous_usage_dir is None:
+            os.environ.pop("SCENE_WIKI_AI_USAGE_DIR", None)
+        else:
+            os.environ["SCENE_WIKI_AI_USAGE_DIR"] = previous_usage_dir
 
     for category, entity_ids in sorted(category_buckets.items()):
         pages.append(
@@ -803,10 +827,13 @@ def build_mediawiki_export(
     _write_mediawiki_import_xml(import_xml_path, pages)
 
     search_dir = output_dir / "static"
+    search_manifest: dict[str, Any] | None = None
     if build_search:
-        build_scene_search_assets(run_dir=run_dir, output_dir=search_dir)
+        search_manifest = build_scene_search_assets(run_dir=run_dir, output_dir=search_dir)
         if wiki_dir is not None:
             bundle_frontend_assets(wiki_dir=wiki_dir.resolve(), output_dir=output_dir)
+
+    ai_usage_report = _write_ai_usage_report(run_dir)
 
     manifest = {
         "site_title": resolved_site_title,
@@ -815,6 +842,8 @@ def build_mediawiki_export(
         "issue_count": len(docs),
         "import_xml": str(import_xml_path),
         "search_dir": str(search_dir) if build_search else None,
+        "search_manifest": search_manifest,
+        "ai_usage_report": ai_usage_report,
     }
     (output_dir / "mediawiki-export.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return manifest

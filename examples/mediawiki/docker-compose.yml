@@ -4,19 +4,20 @@ services:
     container_name: scene-wiki-mediawiki
     restart: unless-stopped
     ports:
-      - "8080:80"
+      - "${MEDIAWIKI_HTTP_PORT:-8080}:80"
     depends_on:
       - db
     environment:
       MEDIAWIKI_DB_TYPE: mysql
       MEDIAWIKI_DB_HOST: db
-      MEDIAWIKI_DB_NAME: mediawiki
-      MEDIAWIKI_DB_USER: mediawiki
-      MEDIAWIKI_DB_PASSWORD: change-me
+      MEDIAWIKI_DB_NAME: ${MEDIAWIKI_DB_NAME:-mediawiki}
+      MEDIAWIKI_DB_USER: ${MEDIAWIKI_DB_USER:-mediawiki}
+      MEDIAWIKI_DB_PASSWORD: ${MEDIAWIKI_DB_PASSWORD:-change-me}
     volumes:
       - ./LocalSettings.php:/var/www/html/LocalSettings.php
       - ./images:/var/www/html/images
       - ./import:/import
+      - ./scene-search:/var/www/html/scene-search
 
   db:
     image: mariadb:11.4
@@ -26,9 +27,9 @@ services:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
     environment:
-      MARIADB_DATABASE: mediawiki
-      MARIADB_USER: mediawiki
-      MARIADB_PASSWORD: change-me
-      MARIADB_ROOT_PASSWORD: change-me-root
+      MARIADB_DATABASE: ${MEDIAWIKI_DB_NAME:-mediawiki}
+      MARIADB_USER: ${MEDIAWIKI_DB_USER:-mediawiki}
+      MARIADB_PASSWORD: ${MEDIAWIKI_DB_PASSWORD:-change-me}
+      MARIADB_ROOT_PASSWORD: ${MEDIAWIKI_DB_ROOT_PASSWORD:-change-me-root}
     volumes:
       - ./db:/var/lib/mysql

@@ -9,7 +9,7 @@ from typing import Any
 
 
 _LOCK = threading.Lock()
-_SUMMARY: dict[str, dict[str, Any]] = {}
+_SUMMARY_BY_DIR: dict[str, dict[str, dict[str, Any]]] = {}
 
 
 MODEL_PRICING_USD_PER_MILLION: dict[str, tuple[float, float]] = {
@@ -18,6 +18,7 @@ MODEL_PRICING_USD_PER_MILLION: dict[str, tuple[float, float]] = {
     "gpt-4.1-nano": (0.10, 0.40),
     "gpt-5.4-mini": (0.75, 3.00),
     "gpt-5.4": (2.00, 8.00),
+    "text-embedding-3-small": (0.02, 0.0),
 }
 
 
@@ -57,30 +58,46 @@ def _events_path(usage_dir: Path) -> Path:
     return usage_dir / "events.jsonl"
 
 
+def _dir_key(usage_dir: Path) -> str:
+    return str(usage_dir.resolve())
+
+
+def _summary_for_dir(usage_dir: Path) -> dict[str, dict[str, Any]]:
+    return _SUMMARY_BY_DIR.setdefault(_dir_key(usage_dir), {})
+
+
+def _totals_for_summary(summary: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "calls": sum(item["calls"] for item in summary.values()),
+        "inputTokens": sum(item["inputTokens"] for item in summary.values()),
+        "outputTokens": sum(item["outputTokens"] for item in summary.values()),
+        "totalTokens": sum(item["totalTokens"] for item in summary.values()),
+        "estimatedCostUsd": round(sum(item["estimatedCostUsd"] for item in summary.values()), 6),
+    }
+
+
+def _write_summary_file(usage_dir: Path, summary: dict[str, dict[str, Any]]) -> None:
+    _summary_path(usage_dir).write_text(
+        json.dumps(
+            {
+                "generatedAt": datetime.now(timezone.utc).isoformat(),
+                "models": summary,
+                "totals": _totals_for_summary(summary),
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def reset_usage_summary() -> None:
     usage_dir = _usage_dir()
     if not usage_dir:
         return
     with _LOCK:
-        _SUMMARY.clear()
-        _summary_path(usage_dir).write_text(
-            json.dumps(
-                {
-                    "generatedAt": datetime.now(timezone.utc).isoformat(),
-                    "models": {},
-                    "totals": {
-                        "calls": 0,
-                        "inputTokens": 0,
-                        "outputTokens": 0,
-                        "totalTokens": 0,
-                        "estimatedCostUsd": 0.0,
-                    },
-                },
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
+        _SUMMARY_BY_DIR[_dir_key(usage_dir)] = {}
+        _write_summary_file(usage_dir, {})
         _events_path(usage_dir).write_text("", encoding="utf-8")
 
 
@@ -121,9 +138,10 @@ def record_openai_usage(
         return event
 
     with _LOCK:
+        summary = _summary_for_dir(usage_dir)
         _events_path(usage_dir).open("a", encoding="utf-8").write(json.dumps(event, sort_keys=True) + "\n")
 
-        model_summary = _SUMMARY.setdefault(
+        model_summary = summary.setdefault(
             normalized_model,
             {
                 "calls": 0,
@@ -140,25 +158,42 @@ def record_openai_usage(
         if estimated_cost is not None:
             model_summary["estimatedCostUsd"] = round(model_summary["estimatedCostUsd"] + estimated_cost, 6)
 
-        totals = {
-            "calls": sum(item["calls"] for item in _SUMMARY.values()),
-            "inputTokens": sum(item["inputTokens"] for item in _SUMMARY.values()),
-            "outputTokens": sum(item["outputTokens"] for item in _SUMMARY.values()),
-            "totalTokens": sum(item["totalTokens"] for item in _SUMMARY.values()),
-            "estimatedCostUsd": round(sum(item["estimatedCostUsd"] for item in _SUMMARY.values()), 6),
-        }
+        totals = _totals_for_summary(summary)
         event["totals"] = totals
-        _summary_path(usage_dir).write_text(
-            json.dumps(
-                {
-                    "generatedAt": datetime.now(timezone.utc).isoformat(),
-                    "models": _SUMMARY,
-                    "totals": totals,
-                },
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
+        _write_summary_file(usage_dir, summary)
 
     return event
+
+
+def merge_usage_summaries(*summary_paths: Path) -> dict[str, Any]:
+    merged_models: dict[str, dict[str, Any]] = {}
+    generated_at = datetime.now(timezone.utc).isoformat()
+    for summary_path in summary_paths:
+        if not summary_path.exists():
+            continue
+        payload = json.loads(summary_path.read_text(encoding="utf-8"))
+        generated_at = max(generated_at, str(payload.get("generatedAt") or generated_at))
+        for model, values in payload.get("models", {}).items():
+            model_summary = merged_models.setdefault(
+                model,
+                {
+                    "calls": 0,
+                    "inputTokens": 0,
+                    "outputTokens": 0,
+                    "totalTokens": 0,
+                    "estimatedCostUsd": 0.0,
+                },
+            )
+            model_summary["calls"] += int(values.get("calls", 0))
+            model_summary["inputTokens"] += int(values.get("inputTokens", 0))
+            model_summary["outputTokens"] += int(values.get("outputTokens", 0))
+            model_summary["totalTokens"] += int(values.get("totalTokens", 0))
+            model_summary["estimatedCostUsd"] = round(
+                model_summary["estimatedCostUsd"] + float(values.get("estimatedCostUsd", 0.0)),
+                6,
+            )
+    return {
+        "generatedAt": generated_at,
+        "models": merged_models,
+        "totals": _totals_for_summary(merged_models),
+    }

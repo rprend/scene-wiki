@@ -15,6 +15,8 @@ import httpx
 from openai import OpenAI
 
 from .config import get_settings
+from .openai_usage import record_openai_usage
+from .openai_usage import reset_usage_summary
 from .scene_wiki import _clean_text
 from .scene_wiki import _entity_blurb
 from .scene_wiki import _entity_search_terms
@@ -111,6 +113,23 @@ def _embed_text_batch(texts: list[str], *, task_type: str, api_key: str) -> list
 
     if len(response.data) != len(texts):
         raise RuntimeError(f"Embedding count mismatch: expected {len(texts)}, got {len(response.data)}")
+
+    usage = getattr(response, "usage", None)
+    prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+    total_tokens = int(getattr(usage, "total_tokens", prompt_tokens) or prompt_tokens)
+    record_openai_usage(
+        requested_model=EMBEDDING_MODEL,
+        resolved_model=getattr(response, "model", None) or EMBEDDING_MODEL,
+        response_id=getattr(response, "id", None),
+        input_tokens=prompt_tokens,
+        output_tokens=0,
+        total_tokens=total_tokens,
+        prompt_chars=sum(len(text) for text in texts),
+        prompt_text="\n\n".join(texts),
+        response_text="",
+        chunk_id=f"{task_type}:{len(texts)}",
+        doc_id=None,
+    )
 
     embeddings: list[list[float]] = []
     for item in response.data:
@@ -350,37 +369,48 @@ def build_scene_search_assets(run_dir: Path, output_dir: Path) -> dict[str, Any]
         raise RuntimeError("No searchable chunks were produced for the scene wiki.")
 
     api_key = _openai_api_key()
+    usage_dir = run_dir / "artifacts" / "search-embedding-usage"
+    usage_dir.mkdir(parents=True, exist_ok=True)
+    previous_usage_dir = os.environ.get("SCENE_WIKI_AI_USAGE_DIR")
+    os.environ["SCENE_WIKI_AI_USAGE_DIR"] = str(usage_dir)
+    reset_usage_summary()
     primary_texts = [chunk["primary_text"] for chunk in chunks]
     embeddings: list[list[float]] = []
     batch_size = _search_embedding_batch_size()
     request_delay_seconds = _search_embed_request_delay_seconds()
     cache_dir = _search_embedding_cache_dir(run_dir)
     total_batches = math.ceil(len(primary_texts) / batch_size)
-    for start in range(0, len(primary_texts), batch_size):
-        batch = primary_texts[start : start + batch_size]
-        end = min(start + batch_size, len(primary_texts))
-        batch_index = start // batch_size + 1
-        batch_chunk_ids = [chunk["chunk_id"] for chunk in chunks[start:end]]
-        cache_path = _search_embedding_cache_path(cache_dir, start, end)
-        cached_batch = _load_cached_search_embedding_batch(cache_path, expected_chunk_ids=batch_chunk_ids)
-        if cached_batch is not None:
+    try:
+        for start in range(0, len(primary_texts), batch_size):
+            batch = primary_texts[start : start + batch_size]
+            end = min(start + batch_size, len(primary_texts))
+            batch_index = start // batch_size + 1
+            batch_chunk_ids = [chunk["chunk_id"] for chunk in chunks[start:end]]
+            cache_path = _search_embedding_cache_path(cache_dir, start, end)
+            cached_batch = _load_cached_search_embedding_batch(cache_path, expected_chunk_ids=batch_chunk_ids)
+            if cached_batch is not None:
+                print(
+                    f"Reusing cached search embedding batch {batch_index}/{total_batches} "
+                    f"({len(cached_batch)} chunks).",
+                    flush=True,
+                )
+                embeddings.extend(cached_batch)
+                continue
+
             print(
-                f"Reusing cached search embedding batch {batch_index}/{total_batches} "
-                f"({len(cached_batch)} chunks).",
+                f"Embedding search batch {batch_index}/{total_batches} ({len(batch)} chunks).",
                 flush=True,
             )
-            embeddings.extend(cached_batch)
-            continue
-
-        print(
-            f"Embedding search batch {batch_index}/{total_batches} ({len(batch)} chunks).",
-            flush=True,
-        )
-        batch_embeddings = _embed_text_batch(batch, task_type=DOCUMENT_TASK_TYPE, api_key=api_key)
-        _write_cached_search_embedding_batch(cache_path, chunk_ids=batch_chunk_ids, embeddings=batch_embeddings)
-        embeddings.extend(batch_embeddings)
-        if request_delay_seconds > 0 and batch_index < total_batches:
-            time.sleep(request_delay_seconds)
+            batch_embeddings = _embed_text_batch(batch, task_type=DOCUMENT_TASK_TYPE, api_key=api_key)
+            _write_cached_search_embedding_batch(cache_path, chunk_ids=batch_chunk_ids, embeddings=batch_embeddings)
+            embeddings.extend(batch_embeddings)
+            if request_delay_seconds > 0 and batch_index < total_batches:
+                time.sleep(request_delay_seconds)
+    finally:
+        if previous_usage_dir is None:
+            os.environ.pop("SCENE_WIKI_AI_USAGE_DIR", None)
+        else:
+            os.environ["SCENE_WIKI_AI_USAGE_DIR"] = previous_usage_dir
 
     if len(chunks) != len(embeddings):
         raise RuntimeError(f"Embedding count mismatch: expected {len(chunks)}, got {len(embeddings)}")
@@ -494,4 +524,5 @@ def build_scene_search_assets(run_dir: Path, output_dir: Path) -> dict[str, Any]
         "chunk_count": len(chunks),
         "chunk_shard_count": len(chunk_shards),
         "embedding_model": EMBEDDING_MODEL,
+        "usage_dir": str(usage_dir),
     }

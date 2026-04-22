@@ -81,17 +81,49 @@ That means:
 
 The example `LocalSettings.php` assumes the sidecar is reachable at:
 
-- `/scene-search/static/scene-search-app.js`
+- `/scene-search/scene-search-app.js`
 - `/scene-search/api/search`
 
 The bundle expects:
 
 - `scene-search-index.json`
 - `scene-search-entities-*.json`
-- `scene-search-issues-*.json`
+- `scene-search-issues.json`
 - `scene-search-chunks-*.json`
-- `static/scene-search-app.js`
+- `scene-search-app.js`
 - `_worker.js`
+
+## DigitalOcean deploy script
+
+There is now a parameterized deploy script at:
+
+- [`scripts/deploy_mediawiki_digitalocean.sh`](/Users/ryanprendergast/Documents/Zenobia%20Pay/scene-wiki/scripts/deploy_mediawiki_digitalocean.sh)
+
+It expects:
+
+- a generated export directory containing `mediawiki-import.xml`
+- SSH access to a Droplet with Docker and Compose available
+- env vars such as `DO_HOST`, `EXPORT_DIR`, `MEDIAWIKI_DB_PASSWORD`, `MEDIAWIKI_DB_ROOT_PASSWORD`, and `MEDIAWIKI_ADMIN_PASS`
+
+Typical usage:
+
+```bash
+DO_HOST=your.droplet.ip \
+EXPORT_DIR=dist/mediawiki/cwt-10 \
+MEDIAWIKI_SITE_TITLE="Conversations with Tyler" \
+MEDIAWIKI_SITE_SERVER="https://cwt.example.com" \
+MEDIAWIKI_DB_PASSWORD=... \
+MEDIAWIKI_DB_ROOT_PASSWORD=... \
+MEDIAWIKI_ADMIN_PASS=... \
+scripts/deploy_mediawiki_digitalocean.sh
+```
+
+This script:
+
+1. uploads the Compose stack plus generated import bundle
+2. bootstraps MediaWiki if the DB is still empty
+3. runs `update`
+4. imports `mediawiki-import.xml`
 
 ## Why this path exists
 
