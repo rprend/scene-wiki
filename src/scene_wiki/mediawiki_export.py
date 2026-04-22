@@ -106,6 +106,7 @@ ENTITY_ARTICLE_MAX_EVIDENCE = 6
 ENTITY_ARTICLE_PROMPT_VERSION = "v3"
 ENTITY_ARTICLE_REQUEST_TIMEOUT_SECONDS = 90.0
 ENTITY_ARTICLE_MAX_RETRIES = 5
+ONE_OFF_ENTITIES_PAGE_TITLE = "One-off entities"
 
 
 def _sanitize_title(value: str) -> str:
@@ -139,6 +140,28 @@ def _wiki_link(target: str, label: str | None = None) -> str:
     if label and label != target:
         return f"[[{target}|{label}]]"
     return f"[[{target}]]"
+
+
+def _entity_issue_ids(entity: dict[str, Any], docs: dict[str, dict[str, Any]]) -> list[str]:
+    return [doc_id for doc_id in entity.get("post_ids", []) if doc_id in docs]
+
+
+def _entity_has_standalone_page(entity: dict[str, Any], docs: dict[str, dict[str, Any]]) -> bool:
+    issue_ids = _entity_issue_ids(entity, docs)
+    mention_count = int(entity.get("mention_count", 0) or 0)
+    return not (mention_count <= 1 and len(issue_ids) <= 1)
+
+
+def _entity_reference_target(
+    entity_id: int,
+    *,
+    entity: dict[str, Any],
+    docs: dict[str, dict[str, Any]],
+    entity_titles: dict[int, str],
+) -> str:
+    if _entity_has_standalone_page(entity, docs):
+        return entity_titles[entity_id]
+    return f"{ONE_OFF_ENTITIES_PAGE_TITLE}#{entity_titles[entity_id]}"
 
 
 def _category_tag(category: str) -> str:
@@ -574,6 +597,7 @@ def _render_issue_page(
     entity_ids: list[int],
     entity_titles: dict[int, str],
     entities: list[dict[str, Any]],
+    docs: dict[str, dict[str, Any]],
 ) -> str:
     lines = [
         f"= {doc.get('title', doc_id)} =",
@@ -588,8 +612,9 @@ def _render_issue_page(
     if entity_ids:
         for entity_id in entity_ids:
             entity = entities[entity_id]
+            target = _entity_reference_target(entity_id, entity=entity, docs=docs, entity_titles=entity_titles)
             lines.append(
-                f"* {_wiki_link(entity_titles[entity_id], entity['name'])} "
+                f"* {_wiki_link(target, entity['name'])} "
                 f"({CATEGORY_TITLES.get(entity.get('category', ''), entity.get('category', '').title())})"
             )
     else:
@@ -610,7 +635,7 @@ def _render_entity_page(
     entities: list[dict[str, Any]],
     entity_titles: dict[int, str],
 ) -> str:
-    issue_ids = [doc_id for doc_id in entity.get("post_ids", []) if doc_id in docs]
+    issue_ids = _entity_issue_ids(entity, docs)
     issue_ids.sort(key=lambda doc_id: docs[doc_id].get("published_at") or "", reverse=True)
     related = sorted(
         related_counts[entity_id].items(),
@@ -684,7 +709,13 @@ def _render_entity_page(
     lines.extend(["", "== Related entities =="])
     if related:
         for related_id, count in related:
-            lines.append(f"* {_wiki_link(entity_titles[related_id], entities[related_id]['name'])} ({count} shared issues)")
+            target = _entity_reference_target(
+                related_id,
+                entity=entities[related_id],
+                docs=docs,
+                entity_titles=entity_titles,
+            )
+            lines.append(f"* {_wiki_link(target, entities[related_id]['name'])} ({count} shared issues)")
     else:
         lines.append("No related entities crossed the co-occurrence threshold.")
 
@@ -700,7 +731,61 @@ def _render_entity_page(
     return "\n".join(lines).strip() + "\n"
 
 
-def _render_category_page(category: str, entity_ids: list[int], entities: list[dict[str, Any]], entity_titles: dict[int, str]) -> str:
+def _render_one_off_entities_page(
+    *,
+    entity_ids: list[int],
+    entities: list[dict[str, Any]],
+    entity_titles: dict[int, str],
+    docs: dict[str, dict[str, Any]],
+    issue_titles: dict[str, str],
+) -> str:
+    buckets: dict[str, list[int]] = defaultdict(list)
+    for entity_id in entity_ids:
+        buckets[entities[entity_id].get("category", "unknown")].append(entity_id)
+
+    lines = [
+        f"= {ONE_OFF_ENTITIES_PAGE_TITLE} =",
+        "",
+        "This page collects low-signal one-off references: entities that appeared only once in a single issue. "
+        "They are preserved here for completeness, but they do not get standalone article pages.",
+    ]
+    for category, bucket_ids in sorted(buckets.items()):
+        category_title = CATEGORY_TITLES.get(category, category.replace("_", " ").title())
+        lines.extend(["", f"== {category_title} =="])
+        for entity_id in sorted(bucket_ids, key=lambda idx: entity_titles[idx].lower()):
+            entity = entities[entity_id]
+            issue_ids = _entity_issue_ids(entity, docs)
+            lines.extend(["", f"=== {entity_titles[entity_id]} ==="])
+            lines.append(f"* Display name: {entity.get('name', entity_titles[entity_id])}")
+            lines.append(f"* Category: {category_title}")
+            lines.append(f"* Mention count: {int(entity.get('mention_count', 0) or 0)}")
+            lines.append(f"* Issue count: {len(issue_ids)}")
+            if entity.get("platform"):
+                lines.append(f"* Platform: {entity['platform']}")
+            if entity.get("handle"):
+                lines.append(f"* Handle: @{entity['handle']}")
+            if entity.get("work_type"):
+                lines.append(f"* Work type: {entity['work_type']}")
+            if issue_ids:
+                lines.append(
+                    "* Appears in: "
+                    + ", ".join(_wiki_link(issue_titles[doc_id], docs[doc_id].get("title", doc_id)) for doc_id in issue_ids)
+                )
+            evidence = [item for item in entity.get("evidence", []) if item]
+            if evidence:
+                lines.append("* Evidence:")
+                for item in evidence[:3]:
+                    lines.append(f"** {item}")
+    return "\n".join(lines).strip() + "\n"
+
+
+def _render_category_page(
+    category: str,
+    entity_ids: list[int],
+    entities: list[dict[str, Any]],
+    entity_titles: dict[int, str],
+    docs: dict[str, dict[str, Any]],
+) -> str:
     category_title = CATEGORY_TITLES.get(category, category.replace("_", " ").title())
     lines = [
         f"= {category_title} =",
@@ -711,7 +796,8 @@ def _render_category_page(category: str, entity_ids: list[int], entities: list[d
     ]
     for entity_id in sorted(entity_ids, key=lambda idx: (-int(entities[idx].get("mention_count", 0)), entity_titles[idx].lower())):
         entity = entities[entity_id]
-        lines.append(f"* {_wiki_link(entity_titles[entity_id], entity['name'])} ({entity.get('mention_count', 0)} mentions)")
+        target = _entity_reference_target(entity_id, entity=entity, docs=docs, entity_titles=entity_titles)
+        lines.append(f"* {_wiki_link(target, entity['name'])} ({entity.get('mention_count', 0)} mentions)")
     lines.extend(["", _category_tag(category)])
     return "\n".join(lines).strip() + "\n"
 
@@ -763,6 +849,12 @@ def build_mediawiki_export(
     doc_entities = build_doc_entities(docs, entities)
     entity_titles = _build_entity_titles(entities)
     issue_titles = {doc_id: _issue_title(doc_id, doc) for doc_id, doc in docs.items()}
+    standalone_entity_ids = [
+        entity_id for entity_id, entity in enumerate(entities) if _entity_has_standalone_page(entity, docs)
+    ]
+    one_off_entity_ids = [
+        entity_id for entity_id, entity in enumerate(entities) if not _entity_has_standalone_page(entity, docs)
+    ]
     related_counts: dict[int, Counter[int]] = defaultdict(Counter)
     for entity_ids in doc_entities.values():
         unique_ids = list(dict.fromkeys(entity_ids))
@@ -801,12 +893,14 @@ def build_mediawiki_export(
                     entity_ids=doc_entities.get(doc_id, []),
                     entity_titles=entity_titles,
                     entities=entities,
+                    docs=docs,
                 ),
             )
         )
 
     try:
-        for entity_id, entity in enumerate(entities):
+        for entity_id in standalone_entity_ids:
+            entity = entities[entity_id]
             category = entity.get("category", "unknown")
             category_buckets[category].append(entity_id)
             pages.append(
@@ -830,11 +924,28 @@ def build_mediawiki_export(
         else:
             os.environ["SCENE_WIKI_AI_USAGE_DIR"] = previous_usage_dir
 
+    for entity_id in one_off_entity_ids:
+        category_buckets[entities[entity_id].get("category", "unknown")].append(entity_id)
+
+    if one_off_entity_ids:
+        pages.append(
+            MediaWikiPage(
+                title=ONE_OFF_ENTITIES_PAGE_TITLE,
+                text=_render_one_off_entities_page(
+                    entity_ids=one_off_entity_ids,
+                    entities=entities,
+                    entity_titles=entity_titles,
+                    docs=docs,
+                    issue_titles=issue_titles,
+                ),
+            )
+        )
+
     for category, entity_ids in sorted(category_buckets.items()):
         pages.append(
             MediaWikiPage(
                 title=f"Category:{CATEGORY_TITLES.get(category, category.replace('_', ' ').title())}",
-                text=_render_category_page(category, entity_ids, entities, entity_titles),
+                text=_render_category_page(category, entity_ids, entities, entity_titles, docs),
             )
         )
 
@@ -860,6 +971,8 @@ def build_mediawiki_export(
         "site_title": resolved_site_title,
         "page_count": len(pages),
         "entity_count": len(entities),
+        "standalone_entity_count": len(standalone_entity_ids),
+        "one_off_entity_count": len(one_off_entity_ids),
         "issue_count": len(docs),
         "import_xml": str(import_xml_path),
         "search_dir": str(search_dir) if build_search else None,
