@@ -62,7 +62,6 @@ type PersistedThreads = {
 }
 
 const THREAD_STORAGE_KEY = "scene-wiki-search-threads-v1"
-const SIDEBAR_OPEN_STORAGE_KEY = "scene-wiki-search-open-v1"
 const SIDEBAR_STYLE_ID = "scene-wiki-search-sidebar-styles"
 const SUGGESTIONS = [
   {
@@ -526,24 +525,6 @@ function ensureSidebarStyles() {
   style.id = SIDEBAR_STYLE_ID
   style.textContent = MEDIAWIKI_SIDEBAR_STYLES
   document.head.appendChild(style)
-}
-
-function loadSidebarOpenState() {
-  if (typeof window === "undefined") return false
-  try {
-    return window.localStorage.getItem(SIDEBAR_OPEN_STORAGE_KEY) === "1"
-  } catch {
-    return false
-  }
-}
-
-function saveSidebarOpenState(isOpen: boolean) {
-  if (typeof window === "undefined") return
-  try {
-    window.localStorage.setItem(SIDEBAR_OPEN_STORAGE_KEY, isOpen ? "1" : "0")
-  } catch {
-    // Ignore localStorage failures.
-  }
 }
 
 function renderInlineMarkdown(text: string): React.ReactNode[] {
@@ -1285,7 +1266,7 @@ function SearchApp() {
   const initialState = useMemo(() => loadPersistedThreads(), [])
   const [threads, setThreads] = useState<StoredThread[]>(initialState.threads)
   const [activeThreadId, setActiveThreadId] = useState(initialState.activeThreadId)
-  const [isOpen, setIsOpen] = useState(loadSidebarOpenState)
+  const [isOpen, setIsOpen] = useState(false)
   const [progressEvents, setProgressEvents] = useState<SearchProgressEvent[]>(
     initialState.threads.find((thread) => thread.id === initialState.activeThreadId)
       ?.progressEvents ?? [],
@@ -1332,10 +1313,6 @@ function SearchApp() {
   useEffect(() => {
     activeThreadIdRef.current = activeThreadId
   }, [activeThreadId])
-
-  useEffect(() => {
-    saveSidebarOpenState(isOpen)
-  }, [isOpen])
 
   return (
     <>

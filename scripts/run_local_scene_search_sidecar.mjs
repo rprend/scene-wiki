@@ -11,6 +11,7 @@ if (!assetDirArg) {
 }
 
 const assetDir = path.resolve(assetDirArg)
+const staticDir = path.join(assetDir, "static")
 const port = Number(portArg || 8091)
 
 const MIME_TYPES = new Map([
@@ -50,6 +51,20 @@ async function serveStaticFile(filePath) {
   }
 }
 
+async function serveAssetByPath(pathname) {
+  const normalized = pathname.replace(/^\/+/, "")
+  const rootPath = path.join(assetDir, normalized)
+  const staticPath = path.join(staticDir, normalized)
+  const preferredPath = normalized === "_worker.js" ? rootPath : staticPath
+  const fallbackPath = normalized === "_worker.js" ? staticPath : rootPath
+
+  let response = await serveStaticFile(preferredPath)
+  if (response.status === 404) {
+    response = await serveStaticFile(fallbackPath)
+  }
+  return response
+}
+
 const workerModulePath = path.join(assetDir, "_worker.js")
 const workerModule = await import(pathToFileURL(workerModulePath).href)
 const worker = workerModule.default
@@ -59,9 +74,8 @@ const env = {
   ASSETS: {
     async fetch(input) {
       const url = typeof input === "string" ? new URL(input) : input instanceof URL ? input : new URL(input.url)
-      const pathname = decodeURIComponent(url.pathname.replace(/^\/+/, ""))
-      const filePath = path.join(assetDir, pathname)
-      return await serveStaticFile(filePath)
+      const pathname = decodeURIComponent(url.pathname)
+      return await serveAssetByPath(pathname)
     },
   },
 }
@@ -96,7 +110,7 @@ const server = createServer(async (req, res) => {
     }
 
     const pathname = decodeURIComponent(url.pathname === "/" ? "/scene-search-app.js" : url.pathname)
-    const response = withCors(await serveStaticFile(path.join(assetDir, pathname.replace(/^\/+/, ""))))
+    const response = withCors(await serveAssetByPath(pathname))
     res.writeHead(response.status, Object.fromEntries(response.headers.entries()))
     const responseBody = Buffer.from(await response.arrayBuffer())
     res.end(responseBody)
