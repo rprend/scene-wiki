@@ -62,6 +62,8 @@ type PersistedThreads = {
 }
 
 const THREAD_STORAGE_KEY = "scene-wiki-search-threads-v1"
+const SIDEBAR_OPEN_STORAGE_KEY = "scene-wiki-search-open-v1"
+const SIDEBAR_STYLE_ID = "scene-wiki-search-sidebar-styles"
 const SUGGESTIONS = [
   {
     title: "Founder dinners",
@@ -81,6 +83,430 @@ const SUGGESTIONS = [
   },
 ]
 
+const MEDIAWIKI_SIDEBAR_STYLES = `
+.semantic-search-sidebar-toggle {
+  position: fixed;
+  top: 6rem;
+  right: 1rem;
+  z-index: 1001;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid rgba(17, 24, 39, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #111827;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.14);
+  backdrop-filter: blur(16px);
+  padding: 0.65rem 0.95rem;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.semantic-search-sidebar-toggle:hover {
+  transform: translateY(-1px);
+}
+
+.semantic-search-sidebar-toggle svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.semantic-search-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  background: rgba(15, 23, 42, 0.18);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+}
+
+.semantic-search-backdrop-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.semantic-search-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(28rem, calc(100vw - 1rem));
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.98);
+  border-left: 1px solid rgba(17, 24, 39, 0.08);
+  box-shadow: -22px 0 60px rgba(15, 23, 42, 0.18);
+  transform: translateX(100%);
+  transition: transform 180ms ease;
+  backdrop-filter: blur(12px);
+}
+
+.semantic-search-drawer-open {
+  transform: translateX(0);
+}
+
+.semantic-search-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.95rem 1rem 0.85rem;
+  border-bottom: 1px solid rgba(17, 24, 39, 0.08);
+}
+
+.semantic-search-drawer-head-copy {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.semantic-search-drawer-kicker {
+  margin: 0;
+  color: #6b7280;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.semantic-search-drawer-title {
+  margin: 0;
+  color: #111827;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.semantic-search-drawer-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.2rem;
+  height: 2.2rem;
+  border: 1px solid rgba(17, 24, 39, 0.08);
+  border-radius: 999px;
+  background: transparent;
+  color: #111827;
+  font: inherit;
+  cursor: pointer;
+}
+
+.semantic-search-sidebar-shell {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  background: transparent;
+}
+
+.semantic-search-thread-nav {
+  display: grid;
+  gap: 0.8rem;
+  border-bottom: 1px solid rgba(17, 24, 39, 0.08);
+  padding: 0.9rem 1rem 0.8rem;
+  background: transparent;
+}
+
+.semantic-search-thread-nav-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.semantic-search-thread-nav-head h2 {
+  margin: 0;
+  color: #111827;
+  font-size: 0.95rem;
+}
+
+.semantic-search-new-chat,
+.semantic-search-thread-pill,
+.semantic-search-related-pill,
+.semantic-search-suggestion,
+.semantic-search-composer,
+.semantic-search-composer-button,
+.semantic-search-user-bubble,
+.semantic-search-drawer-close {
+  box-sizing: border-box;
+}
+
+.semantic-search-new-chat {
+  border: 1px solid rgba(17, 24, 39, 0.1);
+  border-radius: 999px;
+  background: transparent;
+  color: #111827;
+  font: inherit;
+  font-size: 0.84rem;
+  padding: 0.35rem 0.72rem;
+  cursor: pointer;
+}
+
+.semantic-search-thread-pills {
+  display: flex;
+  gap: 0.45rem;
+  overflow-x: auto;
+  padding-bottom: 0.05rem;
+  scrollbar-width: none;
+}
+
+.semantic-search-thread-pills::-webkit-scrollbar {
+  display: none;
+}
+
+.semantic-search-thread-pill {
+  flex: 0 0 auto;
+  border: 1px solid rgba(17, 24, 39, 0.1);
+  border-radius: 999px;
+  background: transparent;
+  color: #4b5563;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.45rem 0.78rem;
+  cursor: pointer;
+}
+
+.semantic-search-thread-pill-active {
+  background: rgba(17, 24, 39, 0.92);
+  border-color: rgba(17, 24, 39, 0.92);
+  color: white;
+}
+
+.semantic-search-thread {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.semantic-search-thread-viewport {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.semantic-search-thread-messages {
+  display: grid;
+  align-content: start;
+  padding-bottom: 0.65rem;
+}
+
+.semantic-search-thread-footer {
+  margin-top: auto;
+  position: sticky;
+  bottom: 0;
+  padding: 0.75rem 1rem 1rem;
+  background: rgba(255, 255, 255, 0.98);
+  border-top: 1px solid rgba(17, 24, 39, 0.08);
+}
+
+.semantic-search-welcome {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.85rem 1rem 0;
+}
+
+.semantic-search-suggestions {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.semantic-search-suggestion {
+  display: grid;
+  gap: 0.12rem;
+  border: 1px solid transparent;
+  border-radius: 0.9rem;
+  background: transparent;
+  padding: 0.55rem 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.semantic-search-suggestion:hover {
+  border-color: rgba(17, 24, 39, 0.12);
+}
+
+.semantic-search-suggestion span {
+  font-size: 0.94rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.semantic-search-suggestion small {
+  color: #6b7280;
+  font-size: 0.85rem;
+}
+
+.semantic-search-message {
+  padding: 0.85rem 1rem 0;
+}
+
+.semantic-search-message-user {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.semantic-search-user-bubble {
+  max-width: min(86%, 24rem);
+  border-radius: 1.4rem 1.4rem 0.5rem 1.4rem;
+  background: rgba(17, 24, 39, 0.96);
+  color: white;
+  padding: 0.8rem 1rem;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+}
+
+.semantic-search-user-bubble p {
+  margin: 0;
+  color: inherit;
+}
+
+.semantic-search-assistant-column {
+  display: grid;
+  gap: 0.95rem;
+}
+
+.semantic-search-answer-body,
+.semantic-search-answer-body p,
+.semantic-search-answer-body h2,
+.semantic-search-answer-body h3,
+.semantic-search-answer-body h4,
+.semantic-search-answer-body ol,
+.semantic-search-answer-body ul,
+.semantic-search-answer-body li {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.semantic-search-answer-body {
+  color: #111827;
+}
+
+.semantic-search-answer-body a,
+.semantic-search-related-pill {
+  color: #1d4ed8;
+}
+
+.semantic-search-answer-body > :first-child {
+  margin-top: 0;
+}
+
+.semantic-search-answer-body > :last-child {
+  margin-bottom: 0;
+}
+
+.semantic-search-answer-body h2 {
+  font-size: 1rem;
+}
+
+.semantic-search-answer-body h3,
+.semantic-search-answer-body h4 {
+  font-size: 0.95rem;
+}
+
+.semantic-search-answer-body blockquote {
+  margin: 0.65rem 0;
+  padding-left: 0.85rem;
+  border-left: 2px solid rgba(17, 24, 39, 0.18);
+}
+
+.semantic-search-alphaloop {
+  display: grid;
+  gap: 0.8rem;
+  padding: 0.2rem 0 0;
+}
+
+.semantic-search-related-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.55rem;
+}
+
+.semantic-search-related-pill {
+  border-radius: 999px;
+  background: transparent;
+  border: 1px solid rgba(17, 24, 39, 0.1);
+  padding: 0.32rem 0.7rem;
+  font-size: 0.84rem;
+  text-decoration: none;
+}
+
+.semantic-search-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid rgba(17, 24, 39, 0.12);
+  border-radius: 2rem;
+  background: white;
+  padding: 0.45rem 0.5rem 0.45rem 0.8rem;
+}
+
+.semantic-search-composer-input {
+  width: 100%;
+  min-height: 1.9rem;
+  max-height: 6rem;
+  resize: none;
+  border: 0;
+  background: transparent;
+  padding: 0.1rem 0;
+  font: inherit;
+  font-size: 0.96rem;
+  line-height: 1.35;
+  box-sizing: border-box;
+  outline: none;
+  box-shadow: none;
+  appearance: none;
+}
+
+.semantic-search-composer-input::placeholder {
+  color: #9ca3af;
+}
+
+.semantic-search-composer-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.semantic-search-composer-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: #111827;
+  color: white;
+  font: inherit;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.semantic-search-composer-button svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+@media (max-width: 900px) {
+  .semantic-search-sidebar-toggle {
+    top: auto;
+    right: 1rem;
+    bottom: 1rem;
+  }
+
+  .semantic-search-drawer {
+    width: min(100vw, 32rem);
+  }
+}
+`
+
 function pageHref(path: string) {
   return `/${path.replace(/^\/+/, "")}`
 }
@@ -91,6 +517,33 @@ function getSearchBasePath() {
   const raw = rootElement?.getAttribute("data-scene-search-base")?.trim() ?? ""
   if (!raw || raw === "/") return ""
   return raw.replace(/\/+$/, "")
+}
+
+function ensureSidebarStyles() {
+  if (typeof document === "undefined") return
+  if (document.getElementById(SIDEBAR_STYLE_ID)) return
+  const style = document.createElement("style")
+  style.id = SIDEBAR_STYLE_ID
+  style.textContent = MEDIAWIKI_SIDEBAR_STYLES
+  document.head.appendChild(style)
+}
+
+function loadSidebarOpenState() {
+  if (typeof window === "undefined") return false
+  try {
+    return window.localStorage.getItem(SIDEBAR_OPEN_STORAGE_KEY) === "1"
+  } catch {
+    return false
+  }
+}
+
+function saveSidebarOpenState(isOpen: boolean) {
+  if (typeof window === "undefined") return
+  try {
+    window.localStorage.setItem(SIDEBAR_OPEN_STORAGE_KEY, isOpen ? "1" : "0")
+  } catch {
+    // Ignore localStorage failures.
+  }
 }
 
 function renderInlineMarkdown(text: string): React.ReactNode[] {
@@ -522,6 +975,36 @@ function StopIcon() {
   )
 }
 
+function SearchIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M10.75 5.5a5.25 5.25 0 1 0 0 10.5 5.25 5.25 0 0 0 0-10.5ZM16 16l3.5 3.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M7 7l10 10M17 7 7 17"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
 function ComposerBar() {
   const isRunning = useAuiState((s) => s.thread.isRunning)
 
@@ -794,10 +1277,15 @@ function SearchThread({
 }
 
 function SearchApp() {
+  useEffect(() => {
+    ensureSidebarStyles()
+  }, [])
+
   const searchBasePath = useMemo(() => getSearchBasePath(), [])
   const initialState = useMemo(() => loadPersistedThreads(), [])
   const [threads, setThreads] = useState<StoredThread[]>(initialState.threads)
   const [activeThreadId, setActiveThreadId] = useState(initialState.activeThreadId)
+  const [isOpen, setIsOpen] = useState(loadSidebarOpenState)
   const [progressEvents, setProgressEvents] = useState<SearchProgressEvent[]>(
     initialState.threads.find((thread) => thread.id === initialState.activeThreadId)
       ?.progressEvents ?? [],
@@ -845,19 +1333,59 @@ function SearchApp() {
     activeThreadIdRef.current = activeThreadId
   }, [activeThreadId])
 
+  useEffect(() => {
+    saveSidebarOpenState(isOpen)
+  }, [isOpen])
+
   return (
-    <AssistantRuntimeProvider runtime={runtime}>
-      <SearchThread
-        runtime={runtime}
-        initialQuery={initialQuery}
-        threads={threads}
-        activeThreadId={activeThreadId}
-        progressEvents={progressEvents}
-        setProgressEvents={setProgressEvents}
-        setThreads={updateThreads}
-        setActiveThreadId={updateActiveThreadId}
+    <>
+      <button
+        type="button"
+        className="semantic-search-sidebar-toggle"
+        onClick={() => setIsOpen((open) => !open)}
+        aria-expanded={isOpen}
+        aria-controls="scene-wiki-search-drawer"
+      >
+        <SearchIcon />
+        <span>{isOpen ? "Hide search" : "Search archive"}</span>
+      </button>
+      <div
+        className={isOpen ? "semantic-search-backdrop semantic-search-backdrop-open" : "semantic-search-backdrop"}
+        onClick={() => setIsOpen(false)}
       />
-    </AssistantRuntimeProvider>
+      <aside
+        id="scene-wiki-search-drawer"
+        className={isOpen ? "semantic-search-drawer semantic-search-drawer-open" : "semantic-search-drawer"}
+        aria-hidden={!isOpen}
+      >
+        <div className="semantic-search-drawer-head">
+          <div className="semantic-search-drawer-head-copy">
+            <p className="semantic-search-drawer-kicker">Semantic Search</p>
+            <h2 className="semantic-search-drawer-title">Archive Assistant</h2>
+          </div>
+          <button
+            type="button"
+            className="semantic-search-drawer-close"
+            aria-label="Close search"
+            onClick={() => setIsOpen(false)}
+          >
+            <CloseIcon />
+          </button>
+        </div>
+        <AssistantRuntimeProvider runtime={runtime}>
+          <SearchThread
+            runtime={runtime}
+            initialQuery={initialQuery}
+            threads={threads}
+            activeThreadId={activeThreadId}
+            progressEvents={progressEvents}
+            setProgressEvents={setProgressEvents}
+            setThreads={updateThreads}
+            setActiveThreadId={updateActiveThreadId}
+          />
+        </AssistantRuntimeProvider>
+      </aside>
+    </>
   )
 }
 
