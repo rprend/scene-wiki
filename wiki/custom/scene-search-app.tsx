@@ -83,6 +83,10 @@ const SUGGESTIONS = [
 ]
 
 const MEDIAWIKI_SIDEBAR_STYLES = `
+[data-scene-search-app]:not([data-semantic-search-ready="1"]) {
+  display: none !important;
+}
+
 .semantic-search-sidebar-toggle {
   position: fixed;
   top: 6rem;
@@ -1258,10 +1262,6 @@ function SearchThread({
 }
 
 function SearchApp() {
-  useEffect(() => {
-    ensureSidebarStyles()
-  }, [])
-
   const searchBasePath = useMemo(() => getSearchBasePath(), [])
   const initialState = useMemo(() => loadPersistedThreads(), [])
   const [threads, setThreads] = useState<StoredThread[]>(initialState.threads)
@@ -1380,6 +1380,8 @@ function mountSearchApp() {
     return
   }
 
+  ensureSidebarStyles()
+
   if (mountedElement !== rootElement) {
     if (appRoot) {
       appRoot.unmount()
@@ -1389,6 +1391,7 @@ function mountSearchApp() {
   }
 
   appRoot.render(<SearchApp />)
+  rootElement.setAttribute("data-semantic-search-ready", "1")
 }
 
 mountSearchApp()
