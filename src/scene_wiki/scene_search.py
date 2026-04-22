@@ -482,7 +482,7 @@ def build_scene_search_assets(run_dir: Path, output_dir: Path) -> dict[str, Any]
     entity_shards = _split_mapping_shards(entity_payload, target_bytes=SEARCH_INDEX_SHARD_TARGET_BYTES)
     search_index = {
         "meta": {
-            "model": EMBEDDING_MODEL,
+            "model": embedding_model,
             "dimensions": embedding_dimensions,
             "document_task_type": DOCUMENT_TASK_TYPE,
             "query_task_type": QUERY_TASK_TYPE,
