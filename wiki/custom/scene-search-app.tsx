@@ -89,7 +89,7 @@ const MEDIAWIKI_SIDEBAR_STYLES = `
 
 .semantic-search-sidebar-toggle {
   position: fixed;
-  top: 6rem;
+  bottom: 1rem;
   right: 1rem;
   z-index: 1001;
   display: inline-flex;
@@ -499,7 +499,6 @@ const MEDIAWIKI_SIDEBAR_STYLES = `
 
 @media (max-width: 900px) {
   .semantic-search-sidebar-toggle {
-    top: auto;
     right: 1rem;
     bottom: 1rem;
   }
@@ -520,6 +519,12 @@ function getSearchBasePath() {
   const raw = rootElement?.getAttribute("data-scene-search-base")?.trim() ?? ""
   if (!raw || raw === "/") return ""
   return raw.replace(/\/+$/, "")
+}
+
+function isSemanticSearchPage() {
+  if (typeof window === "undefined") return false
+  const { pathname } = window.location
+  return /\/(?:wiki|index\.php)\/Semantic[_ ]search$/i.test(pathname)
 }
 
 function ensureSidebarStyles() {
@@ -1263,10 +1268,11 @@ function SearchThread({
 
 function SearchApp() {
   const searchBasePath = useMemo(() => getSearchBasePath(), [])
+  const semanticSearchPage = useMemo(() => isSemanticSearchPage(), [])
   const initialState = useMemo(() => loadPersistedThreads(), [])
   const [threads, setThreads] = useState<StoredThread[]>(initialState.threads)
   const [activeThreadId, setActiveThreadId] = useState(initialState.activeThreadId)
-  const [isOpen, setIsOpen] = useState(false)
+  const [isOpen, setIsOpen] = useState(semanticSearchPage)
   const [progressEvents, setProgressEvents] = useState<SearchProgressEvent[]>(
     initialState.threads.find((thread) => thread.id === initialState.activeThreadId)
       ?.progressEvents ?? [],
@@ -1324,7 +1330,7 @@ function SearchApp() {
         aria-controls="scene-wiki-search-drawer"
       >
         <SearchIcon />
-        <span>{isOpen ? "Hide search" : "Search archive"}</span>
+        <span>{isOpen ? "Hide search" : "Open archive search"}</span>
       </button>
       <div
         className={isOpen ? "semantic-search-backdrop semantic-search-backdrop-open" : "semantic-search-backdrop"}
